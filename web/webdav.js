@@ -116,6 +116,7 @@ export function createWebdav(ctx) {
     const bNew = el('button', { type: 'button', title: 'Create an empty todo file here and open it' }, icon('file-circle-plus'), ' New file');
     const bDir = el('button', { type: 'button', title: 'Create a folder here' }, icon('folder-plus'), ' New folder');
     const bSave = el('button', { type: 'button', title: 'Write the open list to this folder under that name' }, icon('cloud-arrow-up'), ' Save list here');
+    const bFolder = el('button', { type: 'button', title: 'Use this server folder as the todo folder (all its .txt files, notes in notes/)' }, icon('folder-open'), ' Use as folder');
     const close = () => ov.remove();
 
     const load = async () => {
@@ -166,6 +167,9 @@ export function createWebdav(ctx) {
       } catch (e) { say(msg, String(e)); }
     };
     bSave.disabled = !ctx.canSaveHere();
+    bFolder.onclick = async () => {
+      try { await ctx.openFolderUrl(url); close(); } catch (e) { if (String(e.message || e) !== 'cancelled') say(msg, String(e)); }
+    };
     bDir.onclick = async () => {
       const n = name.value.trim();
       if (!n || /[\\/]/.test(n)) { say(msg, 'Enter a folder name without slashes.'); name.focus(); return; }
@@ -180,7 +184,7 @@ export function createWebdav(ctx) {
           el('button', { type: 'button', className: 'icon', title: 'Close (Esc)', 'aria-label': 'Close', onclick: close }, icon('xmark'))),
         el('div', { className: 'dav-top' }, sel, up, crumb),
         body, msg,
-        el('div', { className: 'dav-foot' }, name, bNew, bDir, bSave)));
+        el('div', { className: 'dav-foot' }, name, bNew, bDir, bSave, bFolder)));
     ov.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') close(); });
     ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
     document.body.append(ov);

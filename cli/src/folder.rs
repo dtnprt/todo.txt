@@ -37,9 +37,58 @@ fn note_refs(text: &str, out: &mut HashSet<String>) {
     }
 }
 
+/// A folder on a WebDAV server: an `http(s)://` URL ending with `/`.
+pub fn is_remote_dir(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    crate::webdav::is_remote(&s) && s.ends_with('/')
+}
+
+/// A local directory or a remote folder URL.
+pub fn is_folder(p: &Path) -> bool {
+    is_remote_dir(p) || p.is_dir()
+}
+
+/// `dir/name` (URL-aware).
+pub fn join(dir: &Path, name: &str) -> PathBuf {
+    if is_remote_dir(dir) {
+        PathBuf::from(crate::webdav::join(&dir.to_string_lossy(), name))
+    } else {
+        dir.join(name)
+    }
+}
+
+/// Directory of a file or folder (URL-aware; a remote folder keeps its trailing `/`).
+pub fn parent_of(p: &Path) -> Option<PathBuf> {
+    if crate::webdav::is_remote(&p.to_string_lossy()) {
+        let s = p.to_string_lossy();
+        let up = crate::webdav::parent(&s);
+        return (up.trim_end_matches('/') != s.trim_end_matches('/')).then(|| PathBuf::from(up));
+    }
+    p.parent().map(|x| x.to_path_buf())
+}
+
+/// Remote folder: the `*.txt` files on the server (notes live in `notes/`, so no note-file filtering is needed).
+fn list_remote_txt(dir: &Path) -> Vec<PathBuf> {
+    let Ok(server) = crate::store::server_of(dir) else { return Vec::new() };
+    let url = dir.to_string_lossy();
+    let Ok(list) = crate::webdav::list(&server, &url) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = list
+        .iter()
+        .filter(|e| !e.is_dir)
+        .map(|e| crate::webdav::file_name(&e.url))
+        .filter(|n| is_txt(n) && !n.starts_with('.'))
+        .map(|n| PathBuf::from(crate::webdav::join(&url, &n)))
+        .collect();
+    out.sort_by_key(|p| p.to_string_lossy().to_lowercase());
+    out
+}
+
 /// The visible `*.txt` files of `dir`, sorted by name; files that are the note file of a task
 /// (`note:NAME` in one of the others) are left out.
 pub fn list_txt_files(dir: &Path) -> Vec<PathBuf> {
+    if is_remote_dir(dir) {
+        return list_remote_txt(dir);
+    }
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     if let Ok(rd) = fs::read_dir(dir) {
         for entry in rd.flatten() {
@@ -71,7 +120,7 @@ pub fn list_txt_files(dir: &Path) -> Vec<PathBuf> {
 /// The file to open when a folder is chosen: the remembered one if it is inside, else `todo.txt`, else the first.
 pub fn pick_file(dir: &Path, remembered: Option<&Path>) -> PathBuf {
     if let Some(r) = remembered {
-        if r.parent() == Some(dir) && r.exists() {
+        if r.parent() == Some(dir) && (is_remote_dir(dir) || r.exists()) {
             return r.to_path_buf();
         }
     }
@@ -81,7 +130,7 @@ pub fn pick_file(dir: &Path, remembered: Option<&Path>) -> PathBuf {
         .find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("todo.txt")))
         .or_else(|| files.first())
         .cloned()
-        .unwrap_or_else(|| dir.join("todo.txt"))
+        .unwrap_or_else(|| join(dir, "todo.txt"))
 }
 
 /// Where the note files live.
@@ -249,13 +298,23 @@ pub struct NoteCtx<'a> {
     pub lines: Vec<String>,
 }
 
-/// Open the editor for a new note `name` (typed as `note:` in an input). Returns false if it stayed empty.
+/// Edit the note `name` in the built-in multi-line input (CLI; Enter = new line, Ctrl+Enter saves). Returns false if
+/// the note is empty afterwards.
 pub fn note_via_editor(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::Result<bool> {
     let n = prepare_note(todo, folder, name)?;
-    edit_in_editor(&n.local)?;
+    edit_note_inline(&n, name)?;
     let has = note_nonempty(&n);
     finish_note(&n)?;
     Ok(has)
+}
+
+/// Run the inline multi-line input on the note file (cancel keeps the old content).
+pub fn edit_note_inline(n: &NoteFile, name: &str) -> std::io::Result<()> {
+    let cur = fs::read_to_string(&n.local).unwrap_or_default();
+    if let Some(t) = crate::textarea::run_inline(&format!("note:{name}"), &cur)? {
+        fs::write(&n.local, t)?;
+    }
+    Ok(())
 }
 
 /// Delete the note files of a removed task, unless another line still uses the name.
@@ -279,21 +338,6 @@ pub fn remove_note(todo: &Path, folder: Option<&Path>, removed: &str, remaining:
                 let _ = fs::remove_dir(dir); // only if empty
             }
         }
-    }
-}
-
-/// Open `path` in the user's editor ($VISUAL / $EDITOR, else notepad on Windows, vi elsewhere) and wait.
-pub fn edit_in_editor(path: &Path) -> std::io::Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| if cfg!(windows) { "notepad".into() } else { "vi".into() });
-    let mut parts = editor.split_whitespace();
-    let prog = parts.next().unwrap_or("vi");
-    let status = std::process::Command::new(prog).args(parts).arg(path).status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::new(std::io::ErrorKind::Other, format!("{editor} exited with {status}")))
     }
 }
 
@@ -344,4 +388,10 @@ mod tests {
         let lines = vec!["x note:Note-A".to_string(), "y note:note-b".to_string()];
         assert_eq!(next_note_name(&lines, Some(Path::new("."))), "Note-C");
     }
+}
+
+/// Is `file` located in `dir` (directly or below)? Case-insensitive, `/` and `\` alike.
+pub fn is_inside(dir: &Path, file: &Path) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+    norm(file).starts_with(&(norm(dir) + "/"))
 }

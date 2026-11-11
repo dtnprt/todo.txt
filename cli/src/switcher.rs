@@ -45,13 +45,13 @@ pub enum Pick {
 
 fn build(cfg: &Config, current: &Path) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
-    let folder = cfg.folder.clone().filter(|d| d.is_dir());
+    let folder = cfg.folder.clone().filter(|d| folder::is_folder(d));
     let mut seen: Vec<PathBuf> = Vec::new();
     let mut push_file = |items: &mut Vec<Item>, p: PathBuf, label: String| {
         if seen.contains(&p) {
             return;
         }
-        let fold = folder.clone().filter(|d| p.parent() == Some(d.as_path()));
+        let fold = folder.clone().filter(|d| folder::parent_of(&p).as_deref() == Some(d.as_path()));
         items.push(Item { label, current: p == current, target: Target::File(p.clone(), fold) });
         seen.push(p);
     };
@@ -168,6 +168,8 @@ fn browse(cfg: &Config, entry: &str) -> Result<Option<String>, Box<dyn Error>> {
             labels.push(webdav::file_name(&e.url));
             acts.push(Some((e.url.clone(), false)));
         }
+        labels.push("use this folder (all its .txt files)".into());
+        acts.push(Some((if url.ends_with('/') { url.clone() } else { format!("{url}/") }, false)));
         labels.push("new file here…".into());
         acts.push(None);
         let marks = vec![false; labels.len()];
@@ -198,7 +200,11 @@ fn browse(cfg: &Config, entry: &str) -> Result<Option<String>, Box<dyn Error>> {
 /// A typed path, folder or URL -> (file, folder).
 fn resolve_path(text: &str, cfg: &Config) -> Result<(PathBuf, Option<PathBuf>), Box<dyn Error>> {
     if webdav::is_remote(text) {
-        return Ok((PathBuf::from(text), None));
+        let p = PathBuf::from(text);
+        if folder::is_remote_dir(&p) {
+            return Ok((folder::pick_file(&p, cfg.file.as_deref()), Some(p)));
+        }
+        return Ok((p, None));
     }
     let p = std::path::absolute(text)?;
     if p.is_dir() {
@@ -211,6 +217,7 @@ fn resolve_path(text: &str, cfg: &Config) -> Result<(PathBuf, Option<PathBuf>), 
 fn apply(path: PathBuf, fold: Option<PathBuf>) {
     let p = path.clone();
     config::update(|c| {
+        c.lastfile = Some(p.clone());
         c.file = Some(p.clone());
         c.folder = fold;
         if c.folder.is_none() && !c.files.contains(&p) {
@@ -282,7 +289,10 @@ pub fn run(arg: &str, current: &Path) -> Result<(), Box<dyn Error>> {
             Pick::Item(i) => match items[i].target.clone() {
                 Target::File(p, f) => return Ok(apply(p, f)),
                 Target::Server(s) => match browse(&cfg, &s) {
-                    Ok(Some(url)) => return Ok(apply(PathBuf::from(url), None)),
+                    Ok(Some(url)) => {
+                        let (p, f) = resolve_path(&url, &cfg)?; // a URL ending with `/` = a whole folder
+                        return Ok(apply(p, f));
+                    }
                     Ok(None) => start = i,
                     Err(e) => {
                         eprintln!("todo: {e}");

@@ -9,7 +9,9 @@ const hasFSA = 'showOpenFilePicker' in window;
 // Desktop (Tauri) app: native dialogs and file access instead of the browser APIs.
 const tauri = window.__TAURI__;
 const isTauri = !!(tauri && tauri.dialog && tauri.fs);
-const joinPath = (dir, name) => `${dir.replace(/[\\/]+$/, '')}/${name}`;
+const joinPath = (dir, name) => (/^https?:\/\//i.test(dir) ? davJoin(dir, name) : `${dir.replace(/[\\/]+$/, '')}/${name}`);
+/** Desktop with a folder on this machine (git works there; a WebDAV folder has no git). */
+const localFolder = () => isTauri && !!state.folder && !isRemote(state.folder);
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 const hasDirPicker = 'showDirectoryPicker' in window;
 const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
@@ -164,6 +166,7 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   state.undo = [];
   state.fileName = name;
   state.handle = handle;
+  if (isTauri && path && path !== state.path) setCfg('lastfile', path);   // shared with the CLI/TUI: the file used last is opened next time
   state.path = path;
   diskText = path || handle ? text : null;
   state.dirty = false;
@@ -208,7 +211,7 @@ function setGitMsg(msg) {
 /** Branch + current commit for the status bar (cheap; polled and after saves/sync). */
 async function refreshGitStatus() {
   let st = null;
-  if (isTauri && state.folder) {
+  if (localFolder()) {
     try { st = await invoke('git_status', { dir: state.folder }); } catch { /* ignore */ }
   }
   if (JSON.stringify(st) !== JSON.stringify(state.gitStatus)) { state.gitStatus = st; render(); }
@@ -216,7 +219,7 @@ async function refreshGitStatus() {
 
 async function loadGit() {
   state.git = null;
-  if (isTauri && state.folder) {
+  if (localFolder()) {
     try { state.git = await invoke('git_info', { dir: state.folder }); } catch { /* not available */ }
   }
   render();
@@ -225,7 +228,7 @@ async function loadGit() {
 
 /** Folder opened / app started: pull before the data is read (only if .todo-git.cfg says so). */
 async function gitStart() {
-  if (!isTauri || !state.folder) return;
+  if (!localFolder()) return;
   try {
     const m = await invoke('git_start', { dir: state.folder });
     if (m) setGitMsg(m);
@@ -235,7 +238,7 @@ async function gitStart() {
 
 /** A file was written: commit and push as configured (the push runs in the background). */
 async function gitChanged(name) {
-  if (!isTauri || !state.folder || !state.git || !state.git.enabled || !state.git.auto) return;
+  if (!localFolder() || !state.git || !state.git.enabled || !state.git.auto) return;
   try {
     const m = await invoke('git_changed', { dir: state.folder, name });
     if (m) setGitMsg(m);
@@ -244,7 +247,7 @@ async function gitChanged(name) {
 }
 
 function renderGit() {
-  const show = isTauri && !!state.folder;
+  const show = localFolder();
   const g = state.git;
   $('#gitDd').hidden = !(show && g && g.repo);
   $('#gitInit').style.display = show ? '' : 'none';
@@ -294,7 +297,11 @@ function leaveFolder() {
 async function listFolder() {
   let names = null;
   try {
-    if (isTauri && state.folder) {
+    if (isTauri && state.folder && isRemote(state.folder)) {
+      const items = await invoke('webdav_list', { entry: davEntry(state.folder), url: state.folder });
+      names = items.filter((i) => !i.is_dir && /\.txt$/i.test(i.name) && !i.name.startsWith('.')).map((i) => i.name)
+        .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    } else if (isTauri && state.folder) {
       names = await invoke('list_txt_files', { dir: state.folder });
     } else if (state.dirHandle) {
       const found = [];
@@ -317,7 +324,7 @@ async function listFolder() {
 }
 
 async function refreshFolder() {
-  if (isTauri && state.folder) {
+  if (localFolder()) {
     try { const r = await invoke('git_result'); if (r) setGitMsg(r); } catch { /* ignore */ }
   }
   if ((state.folder || state.dirHandle) && (await listFolder())) renderFileList();
@@ -327,9 +334,9 @@ async function refreshFolder() {
 async function openInFolder(name) {
   if (isTauri) {
     const p = joinPath(state.folder, name);
-    let text = '';
-    try { text = await tauri.fs.readTextFile(p); } catch { /* new file */ }
-    loadText(text, name, null, p);
+    let text = '', etag = null;
+    try { const r = await readAny(p); text = r.missing ? '' : r.text; etag = r.etag || null; } catch (e) { if (isRemote(p)) throw e; /* new local file */ }
+    loadText(text, name, null, p, etag);
     setCfg('file', p);
   } else {
     const h = await state.dirHandle.getFileHandle(name, { create: true });
@@ -340,6 +347,18 @@ async function openInFolder(name) {
 async function switchFolderFile(name) {
   if (name === state.fileName || !confirmDiscard()) return;
   try { await openInFolder(name); } catch (e) { alert(`Could not open ${name}: ${e.message || e}`); }
+}
+
+/** WebDAV folder mode: a folder URL on a server (all its .txt files can be switched between). */
+async function openFolderUrl(url) {
+  if (!confirmDiscard()) throw new Error('cancelled');
+  state.folder = url.endsWith('/') ? url : `${url}/`;
+  state.dirHandle = null;
+  state.git = null;
+  setCfg('folder', state.folder);
+  state.folderFiles = [];
+  await listFolder();
+  await openInFolder(state.folderFiles.includes('todo.txt') ? 'todo.txt' : state.folderFiles[0] || 'todo.txt');
 }
 
 async function openFolder() {
@@ -565,6 +584,7 @@ const dav = createWebdav({
   setServers: (list) => { davServers = list; setCfg('webdav', JSON.stringify(list)); },
   currentUrl: () => (isRemote(state.path) ? state.path : null),
   canSaveHere: () => true,
+  openFolderUrl: (url) => openFolderUrl(url),
   openUrl: async (url) => {
     if (!confirmDiscard()) throw new Error('cancelled');
     const r = await readAny(url);
@@ -612,7 +632,7 @@ function renderFileList() {
   let rows = [];
   if (state.folder) {
     rows = [el('div', { className: 'file-head', title: state.folder },
-      el('i', { className: 'fa-solid fa-folder' }), ' ', baseName(state.folder))];
+      el('i', { className: 'fa-solid fa-folder' }), ' ', baseName(state.folder.replace(/[\\/]+$/, '')))];
     for (const name of state.folderFiles) {
       const pick = el('button', { className: 'file-pick', onclick: () => switchFolderFile(name) }, tick(), name);
       pick.setAttribute('role', 'menuitemradio');
@@ -680,6 +700,8 @@ async function openLastFile() {
       const cfg = await tauri.fs.readTextFile(await cfgPath());
       const m = cfg.match(/^\s*file\s*=\s*(.+?)\s*$/m);
       if (m) target = m[1];
+      const lm = cfg.match(/^\s*lastfile\s*=\s*(.+?)\s*$/m);   // the file used last by any client wins over file=
+      if (lm) target = lm[1];
       const wm = cfg.match(/^\s*webdav\s*=\s*(.+?)\s*$/m);
       if (wm) { try { const a = JSON.parse(wm[1]); if (Array.isArray(a)) davServers = a.filter((x) => typeof x === 'string' && x); } catch { /* ignore */ } }
       const dm = cfg.match(/^\s*folder\s*=\s*(.+?)\s*$/m);
@@ -693,8 +715,14 @@ async function openLastFile() {
       }
       if (target && !state.files.includes(target)) state.files.push(target);
     } catch { /* no config yet */ }
+    const normDir = (x) => x.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    // the last file lies outside the configured folder (or is remote): open it alone, keep folder= in the config
+    if (state.folder && target && !normDir(target).startsWith(normDir(state.folder) + '/')) {
+      state.folder = null;
+      state.folderFiles = [];
+    }
     if (state.folder) {
-      await gitStart();
+      if (localFolder()) await gitStart();
       await listFolder();
       const norm = (x) => x.replace(/\\/g, '/').replace(/\/+$/, '');
       if (!(target && norm(target).startsWith(norm(state.folder) + '/'))) {
@@ -1646,7 +1674,9 @@ $('#lineNoToggle').onclick = () => {
 $('#sideToggle').onclick = () => { state.sidebar = !state.sidebar; persist(); render(); };
 // Dropdown menus (File, View): one open at a time.
 const closeMenus = () => document.querySelectorAll('.dd').forEach((d) => {
-  d.querySelector('.dd-menu').hidden = true;
+  const m = d.querySelector('.dd-menu');
+  if (!m) return;   // e.g. the priority button (popup, not a dropdown)
+  m.hidden = true;
   d.querySelector('.dd-btn').setAttribute('aria-expanded', 'false');
 });
 

@@ -130,11 +130,25 @@ struct Picker {
 impl Picker {
     fn new(dir: PathBuf, select: Option<&str>) -> Picker {
         let mut entries = Vec::new();
-        if dir.parent().is_some() {
+        if folder::parent_of(&dir).is_some() {
             entries.push(PEntry { name: "..".into(), kind: PKind::Up });
         }
         let mut dirs: Vec<String> = Vec::new();
-        if let Ok(rd) = fs::read_dir(&dir) {
+        if crate::webdav::is_remote(&dir.to_string_lossy()) {
+            // a folder on a WebDAV server
+            let url = dir.to_string_lossy().into_owned();
+            if let Ok(server) = crate::store::server_of(&dir) {
+                if let Ok(list) = crate::webdav::list(&server, &url) {
+                    let same = |a: &str| a.trim_end_matches('/') == url.trim_end_matches('/');
+                    dirs = list
+                        .iter()
+                        .filter(|e| e.is_dir && !same(&e.url))
+                        .map(|e| crate::webdav::file_name(&e.url))
+                        .filter(|n| !n.starts_with('.'))
+                        .collect();
+                }
+            }
+        } else if let Ok(rd) = fs::read_dir(&dir) {
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
                 if let Ok(meta) = e.metadata() {
@@ -147,8 +161,13 @@ impl Picker {
         dirs.sort_by_key(|n| n.to_lowercase());
         entries.extend(dirs.into_iter().map(|name| PEntry { name, kind: PKind::Dir }));
         for p in folder::list_txt_files(&dir) {
-            if let Some(n) = p.file_name() {
-                entries.push(PEntry { name: n.to_string_lossy().into_owned(), kind: PKind::File });
+            let n = if crate::webdav::is_remote(&p.to_string_lossy()) {
+                Some(crate::webdav::file_name(&p.to_string_lossy()))
+            } else {
+                p.file_name().map(|n| n.to_string_lossy().into_owned())
+            };
+            if let Some(n) = n {
+                entries.push(PEntry { name: n, kind: PKind::File });
             }
         }
         let idx = select.and_then(|n| entries.iter().position(|e| e.name == n)).unwrap_or(0);
@@ -182,9 +201,9 @@ struct App {
     picker: Option<Picker>,
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
-    pending_editor: Option<folder::NoteFile>,
+    /// Note being edited in the popup (F7, or a `note:` typed into the bar).
+    note_edit: Option<NoteEdit>,
     /// Name of the note being written for a `note:` typed into the bar (finishes the word afterwards).
-    pending_word: Option<String>,
     store: Store,
     undo: Vec<Vec<String>>,
     sort: Sort,
@@ -223,8 +242,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         last_check: Instant::now(),
         picker: None,
         git_menu: None,
-        pending_editor: None,
-        pending_word: None,
+        note_edit: None,
         store,
         undo: Vec::new(),
         sort,
@@ -265,25 +283,6 @@ impl App {
                         self.on_key(k);
                     }
                 }
-            }
-            if let Some(n) = self.pending_editor.take() {
-                // give the terminal to the editor, then take it back
-                ratatui::restore();
-                let res = folder::edit_in_editor(&n.local);
-                *terminal = ratatui::init();
-                let has = folder::note_nonempty(&n);
-                if let Some(name) = self.pending_word.take() {
-                    // `note:` typed in the bar: it becomes note:NAME, or disappears if the note is empty
-                    self.input.set_note_word(if res.is_ok() && has { Some(&name) } else { None });
-                    self.on_input_changed();
-                }
-                self.msg = Some(match res.and_then(|_| folder::finish_note(&n)) {
-                    Ok(()) => {
-                        self.git_commit();
-                        format!("Note saved: {}", n.local.display())
-                    }
-                    Err(e) => format!("Editor failed: {e}"),
-                });
             }
             if let Some(m) = git::take_result() {
                 self.msg = Some(m); // outcome of a background push
@@ -363,6 +362,7 @@ impl App {
                 let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 let (p2, f2) = (path.clone(), folder.clone());
                 config::update(|c| {
+                    c.lastfile = Some(p2.clone());
                     c.file = Some(p2);
                     c.folder = f2;
                 });
@@ -390,10 +390,72 @@ impl App {
                 n
             }
         };
-        match folder::prepare_note(&self.path, self.folder.as_deref(), &name) {
-            Ok(p) => self.pending_editor = Some(p),
-            Err(e) => self.msg = Some(format!("Could not create note file: {e}")),
+        self.open_note_edit(&name, false);
+    }
+
+    /// Open the note popup for `name`; `word` = it was started by typing `note:` into the bar.
+    fn open_note_edit(&mut self, name: &str, word: bool) {
+        match folder::prepare_note(&self.path, self.folder.as_deref(), name) {
+            Ok(n) => {
+                let text = fs::read_to_string(&n.local).unwrap_or_default();
+                self.assist = None;
+                self.note_edit = Some(NoteEdit { n, name: name.to_string(), word, ta: crate::textarea::TextArea::new(&text) });
+            }
+            Err(e) => self.msg = Some(format!("Could not open note: {e}")),
         }
+    }
+
+    fn note_key(&mut self, k: KeyEvent) {
+        use crate::textarea::Outcome;
+        let Some(ne) = &mut self.note_edit else { return };
+        let outcome = ne.ta.handle_key(k);
+        if outcome == Outcome::Continue {
+            return;
+        }
+        let Some(ne) = self.note_edit.take() else { return };
+        let save = outcome == Outcome::Save;
+        if save {
+            if let Err(e) = fs::write(&ne.n.local, ne.ta.text()) {
+                self.msg = Some(format!("Could not write note: {e}"));
+                return;
+            }
+        }
+        let has = folder::note_nonempty(&ne.n);
+        let res = folder::finish_note(&ne.n);
+        if ne.word {
+            // `note:` typed in the bar: it becomes note:NAME, or disappears if the note is empty / cancelled
+            self.input.set_note_word(if save && has { Some(&ne.name) } else { None });
+            self.on_input_changed();
+        }
+        self.msg = Some(match res {
+            Ok(()) if save => {
+                self.git_commit();
+                format!("Note saved: {}", ne.name)
+            }
+            Ok(()) => "Note cancelled".to_string(),
+            Err(e) => format!("Note failed: {e}"),
+        });
+    }
+
+    fn draw_note_edit(&self, f: &mut Frame, area: Rect) {
+        let Some(ne) = &self.note_edit else { return };
+        let w = area.width.saturating_sub(6).clamp(20, 100).min(area.width);
+        let h = area.height.saturating_sub(4).clamp(6, 30).min(area.height);
+        let rect = Rect::new(area.x + area.width.saturating_sub(w) / 2, area.y + area.height.saturating_sub(h) / 2, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" note:{} ", ne.name))
+            .title_bottom(" Enter new line · Ctrl+Enter / Ctrl+S save · Esc cancel ");
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        let rows = inner.height as usize;
+        let first = (ne.ta.row + 1).saturating_sub(rows);
+        let lines: Vec<Line> = ne.ta.lines.iter().skip(first).take(rows).map(|l| Line::from(l.as_str())).collect();
+        f.render_widget(Paragraph::new(lines), inner);
+        let before: String = ne.ta.lines[ne.ta.row].chars().take(ne.ta.col).collect();
+        let x = (inner.x + before.width() as u16).min(inner.x + inner.width.saturating_sub(1));
+        f.set_cursor_position(Position::new(x, inner.y + (ne.ta.row - first) as u16));
     }
 
     // ---------------------------------------------------------------- file selector
@@ -406,16 +468,16 @@ impl App {
             self.leave_search();
         }
         self.assist = None;
-        if crate::webdav::is_remote(&self.path.to_string_lossy()) && self.folder.is_none() {
-            self.msg = Some("WebDAV file: switch with `todo -F` (menu with server browser)".into());
-            return;
-        }
         let dir = self
             .folder
             .clone()
-            .or_else(|| self.path.parent().map(|p| p.to_path_buf()))
+            .or_else(|| folder::parent_of(&self.path))
             .unwrap_or_else(|| PathBuf::from("."));
-        let cur = self.path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let cur = Some(if crate::webdav::is_remote(&self.path.to_string_lossy()) {
+            crate::webdav::file_name(&self.path.to_string_lossy())
+        } else {
+            self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        });
         self.picker = Some(Picker::new(dir, cur.as_deref()));
     }
 
@@ -447,17 +509,25 @@ impl App {
                 let Some(e) = pk.entries.get(pk.idx()) else { return };
                 match e.kind {
                     PKind::Up => {
-                        if let Some(parent) = pk.dir.parent().map(|p| p.to_path_buf()) {
-                            let from = pk.dir.file_name().map(|n| n.to_string_lossy().into_owned());
+                        if let Some(parent) = folder::parent_of(&pk.dir) {
+                            let from = Some(if crate::webdav::is_remote(&pk.dir.to_string_lossy()) {
+                                crate::webdav::file_name(&pk.dir.to_string_lossy())
+                            } else {
+                                pk.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                            });
                             *pk = Picker::new(parent, from.as_deref());
                         }
                     }
                     PKind::Dir => {
-                        let dir = pk.dir.join(&e.name);
+                        let dir = if crate::webdav::is_remote(&pk.dir.to_string_lossy()) {
+                            PathBuf::from(format!("{}/", crate::webdav::join(&pk.dir.to_string_lossy(), &e.name).trim_end_matches('/')))
+                        } else {
+                            pk.dir.join(&e.name)
+                        };
                         *pk = Picker::new(dir, None);
                     }
                     PKind::File if k.code == KeyCode::Enter => {
-                        let path = pk.dir.join(&e.name);
+                        let path = folder::join(&pk.dir, &e.name);
                         // staying in the folder keeps folder mode; a file elsewhere leaves it
                         let folder = if self.folder.as_deref() == Some(pk.dir.as_path()) { self.folder.clone() } else { None };
                         self.picker = None;
@@ -954,6 +1024,10 @@ impl App {
 
     fn on_key(&mut self, k: KeyEvent) {
         self.msg = None;
+        if self.note_edit.is_some() {
+            self.note_key(k);
+            return;
+        }
         if self.help {
             self.help = false;
             return;
@@ -1186,14 +1260,7 @@ impl App {
                         self.on_input_changed();
                         if k.code == KeyCode::Char(':') && self.mode != Mode::Search && self.input.note_trigger() {
                             let name = folder::next_note_name_with(&self.store.lines, &self.input.text, self.folder.as_deref());
-                            match folder::prepare_note(&self.path, self.folder.as_deref(), &name) {
-                                Ok(n) => {
-                                    self.pending_editor = Some(n);
-                                    self.pending_word = Some(name);
-                                    self.assist = None;
-                                }
-                                Err(e) => self.msg = Some(format!("Could not create note file: {e}")),
-                            }
+                            self.open_note_edit(&name, true);
                         }
                     }
                     Edited::Word(_) => {
@@ -1236,6 +1303,9 @@ impl App {
         }
         if self.git_menu.is_some() {
             self.draw_git_menu(f, area);
+        }
+        if self.note_edit.is_some() {
+            self.draw_note_edit(f, area);
         }
         if self.help {
             self.draw_help(f, area);
@@ -1688,4 +1758,12 @@ fn popup_rect(list_area: Rect, input_area: Rect, w: u16, h: u16) -> Rect {
     let h = h.min(input_area.y.saturating_sub(list_area.y).max(3));
     let y = input_area.y.saturating_sub(h);
     Rect::new(list_area.x + 1, y, w, h)
+}
+
+/// The note popup (a multi-line input, no external editor).
+struct NoteEdit {
+    n: folder::NoteFile,
+    name: String,
+    word: bool,
+    ta: crate::textarea::TextArea,
 }

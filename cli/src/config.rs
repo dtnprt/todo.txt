@@ -19,6 +19,8 @@ pub fn config_path() -> PathBuf {
 pub struct Config {
     /// The todo.txt that was used last.
     pub file: Option<PathBuf>,
+    /// The file used last by any client (`lastfile=`, written on every use, also for one-off files); opened at start.
+    pub lastfile: Option<PathBuf>,
     /// Default sort order name (priority, due, created, alpha, file).
     pub sort: Option<String>,
     /// Folder mode: a folder whose `*.txt` files are all todo lists (`folder=`, shared with the desktop app).
@@ -52,6 +54,7 @@ impl Config {
             let (k, v) = (k.trim(), v.trim());
             match k {
                 "file" if !v.is_empty() => cfg.file = Some(PathBuf::from(v)),
+                "lastfile" if !v.is_empty() => cfg.lastfile = Some(PathBuf::from(v)),
                 "sort" if !v.is_empty() => cfg.sort = Some(v.to_string()),
                 "folder" => cfg.folder = Some(PathBuf::from(v)).filter(|_| !v.is_empty()),
                 "showdone" => cfg.show_done = parse_bool(v),
@@ -74,6 +77,10 @@ impl Config {
         let mut out = String::from("# todo.txt command line tool\n");
         if let Some(f) = &self.file {
             out.push_str(&format!("file={}\n", f.display()));
+        }
+        if let Some(f) = &self.lastfile {
+            out.push_str(&format!("lastfile={}
+", f.display()));
         }
         if let Some(s) = &self.sort {
             out.push_str(&format!("sort={s}\n"));

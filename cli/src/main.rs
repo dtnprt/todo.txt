@@ -10,6 +10,7 @@
 mod config;
 mod editor;
 mod folder;
+mod textarea;
 mod git;
 mod highlight;
 mod input;
@@ -117,7 +118,7 @@ struct Cli {
     #[arg(short = 'x', long, value_name = "NUMBER")]
     done: Option<usize>,
 
-    /// Edit the note of line NUMBER in your editor ($VISUAL / $EDITOR); adds `note:NAME` if missing
+    /// Edit the note of line NUMBER in a multi-line input (Enter = new line, Ctrl+Enter saves); adds `note:NAME` if missing
     #[arg(short = 'D', long, value_name = "NUMBER")]
     note: Option<usize>,
 
@@ -129,7 +130,7 @@ struct Cli {
     #[arg(long, value_name = "USER@URL")]
     webdav_logout: Option<String>,
 
-    /// WebDAV: list the files and folders at URL (without URL: the first server)
+    /// WebDAV: list the files and folders at URL (without URL: the folder of the current todo.txt, or the first server)
     #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
     webdav_ls: Option<String>,
 
@@ -185,7 +186,12 @@ fn webdav_cmds(cli: &Cli, cfg: &mut Config) -> Result<(), Box<dyn Error>> {
     }
     if let Some(url) = &cli.webdav_ls {
         let url = if url.is_empty() {
-            cfg.webdav.first().and_then(|e| webdav::Server::parse(e)).map(|s| s.url).ok_or("no WebDAV server configured (todo --webdav-login USER@URL)")?
+            // the folder the current todo file lies in (if it is on a WebDAV server), else the first server
+            let cur = cfg.lastfile.clone().or_else(|| cfg.file.clone()).map(|p| p.to_string_lossy().into_owned());
+            match cur.filter(|c| webdav::is_remote(c)) {
+                Some(c) => webdav::parent(&c),
+                None => cfg.webdav.first().and_then(|e| webdav::Server::parse(e)).map(|s| s.url).ok_or("no WebDAV server configured (todo --webdav-login USER@URL)")?,
+            }
         } else {
             url.clone()
         };
@@ -217,7 +223,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let early_dir = match &cli.file {
         Some(f) if webdav::is_remote(&f.to_string_lossy()) => None,
         Some(f) => std::path::absolute(f).ok().filter(|p| p.is_dir()),
-        None => cfg.folder.clone().filter(|d| d.is_dir()),
+        None => cfg.folder.clone().filter(|d| d.is_dir()), // (a WebDAV folder has no git)
     };
     // the interactive UI does its own pull / commit / push
     let idle = cli.words.join(" ").trim().is_empty()
@@ -250,25 +256,36 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     // folder mode: `-f FOLDER`, or `folder=` in the config; otherwise a single file
     let mut folder: Option<PathBuf> = None;
+    // the file used last (any client) wins over `file=` at start; `file=` stays the remembered default
+    let last = cfg.lastfile.clone().or_else(|| cfg.file.clone());
+    let last_is_remote = last.as_ref().is_some_and(|f| webdav::is_remote(&f.to_string_lossy()));
+    let last_outside_folder = match (&cfg.folder, &last) {
+        (Some(d), Some(l)) => folder::is_folder(d) && !folder::is_inside(d, l) && (last_is_remote || l.exists()),
+        _ => false,
+    };
     let path = match &cli.file {
+        Some(f) if folder::is_remote_dir(f) => {
+            folder = Some(f.clone());
+            folder::pick_file(f, last.as_deref())
+        }
         Some(f) if webdav::is_remote(&f.to_string_lossy()) => f.clone(),
         Some(f) => {
             let f = std::path::absolute(f)?;
             if f.is_dir() {
                 folder = Some(f.clone());
-                folder::pick_file(&f, cfg.file.as_deref())
+                folder::pick_file(&f, last.as_deref())
             } else {
                 f
             }
         }
         // the last file was on a WebDAV server: use it (also when a folder= is configured from earlier)
-        None if cfg.file.as_ref().is_some_and(|f| webdav::is_remote(&f.to_string_lossy())) => cfg.file.clone().unwrap(),
-        None => match cfg.folder.clone().filter(|d| d.is_dir()) {
+        None if last_outside_folder || (last_is_remote && cfg.folder.is_none()) => last.clone().unwrap(),
+        None => match cfg.folder.clone().filter(|d| folder::is_folder(d)) {
             Some(d) => {
                 folder = Some(d.clone());
-                folder::pick_file(&d, cfg.file.as_deref())
+                folder::pick_file(&d, last.as_deref())
             }
-            None => cfg.file.clone().unwrap_or_else(config::default_todo_file),
+            None => last.clone().unwrap_or_else(config::default_todo_file),
         },
     };
     // `-f FILE` outside the folder of the remembered file (e.g. a todo.txt in another git repository) is used for
@@ -280,7 +297,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             Some(last) => switcher::dir_of(&last.to_string_lossy()) != switcher::dir_of(&path.to_string_lossy()) && (webdav::is_remote(&path.to_string_lossy()) || path.exists()),
             None => false,
         };
-    let remote_last = cli.file.is_none() && folder.is_none() && cfg.file.as_ref() == Some(&path) && webdav::is_remote(&path.to_string_lossy());
+    // started from `lastfile=` without -f: nothing was chosen, so `file=` / `folder=` stay as they are
+    let remote_last = cli.file.is_none() && cfg.lastfile.is_some();
     if !one_off && !remote_last && (cfg.file.as_ref() != Some(&path) || cfg.folder != folder || (folder.is_none() && !cfg.files.contains(&path))) {
         cfg.file = Some(path.clone());
         cfg.folder = folder.clone();
@@ -288,6 +306,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             cfg.files.push(path.clone()); // known files, for the switcher (todo -F)
         }
         let _ = cfg.save(); // remembering the file is a convenience, never fatal
+    }
+    if cfg.lastfile.as_ref() != Some(&path) {
+        cfg.lastfile = Some(path.clone());
+        let _ = cfg.save();
     }
 
     let sort_arg = match &cli.sort {
@@ -364,7 +386,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             }
         };
         let file = folder::prepare_note(&path, folder.as_deref(), &name)?;
-        folder::edit_in_editor(&file.local)?;
+        folder::edit_note_inline(&file, &name)?;
         folder::finish_note(&file)?;
         return Ok(());
     }
