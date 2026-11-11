@@ -135,10 +135,20 @@ export function deleteWord(e, input) {
 /** Colour-coded spans for priority, done marker, dates, +tags, @contexts, due and key:value words. */
 export function highlight(text) {
   const frag = document.createDocumentFragment();
+  // `code` spans (may contain spaces): colour only, so the overlay keeps the input's font metrics
+  text.split(/(`[^`\n]+`)/).forEach((seg, k) => {
+    if (k % 2) frag.append(el('span', { className: 'tk-code', textContent: seg }));
+    else if (seg) highlightWords(frag, seg, k === 0);
+  });
+  return frag;
+}
+
+function highlightWords(frag, text, atStart) {
   text.split(/(\s+)/).forEach((p, idx, parts) => {
     if (!p) return;
     const nextIsSpace = /^\s/.test(parts[1] || '');
     let cls = '';
+    if (!atStart) idx = 1;
     if (idx === 0 && /^\([A-Z]\)$/.test(p) && nextIsSpace) cls = `tk-pri tk-p${p[1]}`;
     else if (idx === 0 && /^\([A-Za-z]?\)?$/.test(p)) cls = `tk-pri tk-p${p[1] ? p[1].toUpperCase() : ''}`; // priority being typed
     else if (idx === 0 && p === 'x' && nextIsSpace) cls = 'tk-done';
@@ -149,7 +159,6 @@ export function highlight(text) {
     else if (/^[^\s:]+:[^\s:]+$/.test(p) && !p.includes('://')) cls = 'tk-meta';
     frag.append(cls ? el('span', { className: cls, textContent: p }) : p);
   });
-  return frag;
 }
 
 /**

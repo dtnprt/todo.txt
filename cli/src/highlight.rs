@@ -11,6 +11,7 @@ pub enum Tok {
     Context,
     Due,
     Meta,
+    Code, // `inline code`
 }
 
 fn is_iso_date(p: &str) -> bool {
@@ -43,6 +44,34 @@ fn partial_priority(p: &str) -> Option<char> {
 
 /// `prefix`: apply the rules that only make sense at the start of a task line (priority, `x`).
 pub fn highlight(text: &str, prefix: bool) -> Vec<(String, Tok)> {
+    // `code` spans (may contain spaces) are cut out first; the rest is tokenised by words
+    let mut out = Vec::new();
+    let mut rest = text;
+    let mut first = true;
+    while !rest.is_empty() {
+        let span = rest.find('`').and_then(|a| {
+            let close = rest[a + 1..].find('`')?;
+            (close > 0 && !rest[a + 1..a + 1 + close].contains('\n')).then_some((a, a + close + 2))
+        });
+        match span {
+            Some((a, b)) => {
+                if a > 0 {
+                    out.extend(words(&rest[..a], prefix && first));
+                }
+                out.push((rest[a..b].to_string(), Tok::Code));
+                rest = &rest[b..];
+            }
+            None => {
+                out.extend(words(rest, prefix && first));
+                break;
+            }
+        }
+        first = false;
+    }
+    out
+}
+
+fn words(text: &str, prefix: bool) -> Vec<(String, Tok)> {
     // split into alternating runs of whitespace / non-whitespace, keeping everything
     let mut runs: Vec<(String, bool)> = Vec::new();
     for ch in text.chars() {
@@ -104,6 +133,8 @@ mod tests {
         assert_eq!(kinds("(")[0], Tok::Priority('\0'));
         assert_eq!(kinds("Call 15.03.")[1], Tok::Date);
         assert_eq!(kinds("see http://x.y")[1], Tok::Plain);
+        assert_eq!(kinds("run `ls -la +x` now"), vec![Tok::Plain, Tok::Code, Tok::Plain]);
+        assert_eq!(kinds("open `unclosed +x"), vec![Tok::Plain, Tok::Plain, Tok::Project]);
         // concatenating the pieces gives the original text back
         let s = "  (B)  a  +b ";
         assert_eq!(highlight(s, true).into_iter().map(|(t, _)| t).collect::<String>(), s);

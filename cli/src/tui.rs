@@ -54,6 +54,7 @@ fn tok_style(tok: Tok) -> Style {
         Tok::Priority(c) => Style::default().fg(pri_color(c)).add_modifier(Modifier::BOLD),
         Tok::Done => Style::default().fg(Color::Green),
         Tok::Date | Tok::Meta => Style::default().fg(Color::Gray),
+        Tok::Code => Style::default().fg(Color::Cyan),
         Tok::Project => Style::default().fg(Color::LightBlue),
         Tok::Context => Style::default().fg(Color::Green),
         Tok::Due => Style::default().fg(Color::Yellow),

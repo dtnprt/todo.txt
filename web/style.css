@@ -132,6 +132,8 @@ button:disabled.dd-item, .dd-menu button:disabled { opacity: .45; }
 .tk-context { color: var(--ok); }
 .tk-due { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); border-radius: 3px; }
 .tk-meta { color: var(--muted); }
+.tk-code { color: var(--accent); }
+code.code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; padding: 1px 5px; border-radius: 4px; color: var(--text); background: color-mix(in srgb, var(--muted) 18%, transparent); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); white-space: pre-wrap; }
 
 .ac { position: absolute; left: 0; bottom: calc(100% + 6px); min-width: 220px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; z-index: 10; }
 .ac.list { display: flex; flex-direction: column; }

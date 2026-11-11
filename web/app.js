@@ -1039,7 +1039,17 @@ function renderSidebar() {
 /** Render a task description with clickable projects/contexts, tag badges and links. */
 function renderText(t, i) {
   const frag = document.createDocumentFragment();
-  for (const part of t.text.split(/(\s+)/)) {
+  // `inline code` (may contain spaces) is cut out first, everything else is handled word by word
+  const segs = t.text.split(/(`[^`\n]+`)/);
+  for (const seg of segs) {
+    if (/^`[^`\n]+`$/.test(seg)) { frag.append(el('code', { className: 'code', textContent: seg.slice(1, -1) })); continue; }
+    renderWords(frag, seg, t, i);
+  }
+  return frag;
+}
+
+function renderWords(frag, text, t, i) {
+  for (const part of text.split(/(\s+)/)) {
     if (part.length > 1 && part[0] === '+') {
       frag.append(el('button', { className: 'chip project', textContent: part, onclick: () => toggleFilter('project', part.slice(1)) }));
     } else if (part.length > 1 && part[0] === '@') {
@@ -1059,7 +1069,6 @@ function renderText(t, i) {
       }
     }
   }
-  return frag;
 }
 
 function renderTask({ i, t }, idx) {

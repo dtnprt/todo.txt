@@ -47,6 +47,7 @@ pub fn paint(s: &str, tok: Tok, today: &str, color: bool) -> String {
         Tok::Priority(c) => pri_code(c),
         Tok::Done => "32",
         Tok::Date | Tok::Meta => "90",
+        Tok::Code => "36",
         Tok::Project => "94",
         Tok::Context => "32",
         Tok::Due => match s.strip_prefix("due:").and_then(|d| {
