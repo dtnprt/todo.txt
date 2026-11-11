@@ -430,3 +430,15 @@ body.android .sidebar { margin-left: 0; }
 html { overflow-x: hidden; }
 body { overflow-x: clip; }
 .status-hover { margin-left: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
+
+/* theme tab footer: variant switch (left) and Reload button (right) under the theme list */
+.theme-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 4px 0; }
+.variant-box { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.variant-label { color: var(--muted); font-size: .9em; text-transform: uppercase; letter-spacing: .06em; }
+.variant-seg { display: inline-flex; border: 1.5px solid var(--accent); border-radius: 8px; overflow: hidden; }
+.set-pane .variant-seg button { border-radius: 0; padding: 7px 16px; background: var(--panel); color: var(--text); font-weight: 600; }
+.set-pane .variant-seg button + button { border-left: 1.5px solid var(--accent); }
+.set-pane .variant-seg button[aria-checked=true] { background: var(--accent); color: var(--accent-text); }
+.set-pane .variant-seg button:hover:not([aria-checked=true]) { background: var(--hover); }
+.set-pane button.theme-reload { flex: none; margin-left: auto; padding: 8px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; justify-content: center; }
+.set-pane button.theme-reload:hover { background: var(--hover); border-color: var(--accent); }

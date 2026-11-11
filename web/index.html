@@ -117,8 +117,11 @@
         <button id="minimalToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Minimal mode <kbd>F11</kbd></button>
       </div>
       <div class="set-pane" data-pane="themes" hidden>
-        <button id="themeReload" type="button" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
         <div id="themeMenu" role="menu"></div>
+        <div class="theme-foot">
+          <div id="themeVariantBox" class="variant-box"></div>
+          <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
+        </div>
       </div>
       <div class="set-pane" data-pane="webdav" hidden></div>
     </div>

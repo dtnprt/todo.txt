@@ -135,6 +135,8 @@ function restore() {
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
+    if (s.theme === 'space' || s.theme === 'user:space') s.theme = 'user:space-game';   // renamed
+    if (s.theme === 'lcars' || s.theme === 'user:lcars') s.theme = 'user:LCARS';   // renamed
     state.theme = isTauri && typeof s.theme === 'string' && s.theme ? (s.theme.startsWith('user:') ? s.theme : 'user:' + (s.theme === 'zelda' ? 'sheikah' : s.theme)) : '';
   } catch { /* corrupted: start empty */ }
 }
@@ -1764,14 +1766,22 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const label = (key) => key.replace(/^user:/, '') === 'grand-theft-six' ? 'Grand Theft Six' : key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
+  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game' };
+  const label = (key) => NICE[key.replace(/^user:/, '')] || key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];
-  if (vars.length > 1) {   // variant dropdown of the chosen theme
-    const sel = el('select', { id: 'themeVariant', title: 'Variant of this theme' });
-    for (const [l, v] of vars) sel.append(el('option', { value: v, textContent: l, selected: v === state.theme }));
-    sel.onchange = () => { state.theme = sel.value; persist(); render(); };
-    menu.append(el('label', { className: 'theme-variant' }, 'Variant ', sel));
+  const vbox = $('#themeVariantBox');   // under the list, left of the Reload button
+  vbox.replaceChildren();
+  if (vars.length > 1) {   // variant switch of the chosen theme: a row of toggle buttons
+    vbox.append(el('span', { className: 'variant-label', textContent: 'Variant' }));
+    const seg = el('div', { className: 'variant-seg', role: 'radiogroup', id: 'themeVariant' });
+    for (const [l, v] of vars) {
+      const b = el('button', { type: 'button', role: 'radio', textContent: l, title: `Use the ${l} variant` });
+      b.setAttribute('aria-checked', String(v === state.theme));
+      b.onclick = () => { state.theme = v; persist(); render(); buildThemeMenu(); };
+      seg.append(b);
+    }
+    vbox.append(seg);
   }
   const add = (key, text) => {
     const b = el('button', { role: 'menuitemradio' }, el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' })), ' ' + text);
