@@ -230,6 +230,34 @@ pub fn finish_note(n: &NoteFile) -> std::io::Result<()> {
     Ok(())
 }
 
+/// True if the note file (after editing) has any text.
+pub fn note_nonempty(n: &NoteFile) -> bool {
+    fs::read_to_string(&n.local).map(|t| !t.trim().is_empty()).unwrap_or(false)
+}
+
+/// Default name for a note typed into a text that is not in `lines` yet.
+pub fn next_note_name_with(lines: &[String], extra: &str, folder: Option<&Path>) -> String {
+    let mut v = lines.to_vec();
+    v.push(extra.to_string());
+    next_note_name(&v, folder)
+}
+
+/// Where the interactive add/edit prompt (`todo -a`, `-e`) finds its notes.
+pub struct NoteCtx<'a> {
+    pub todo: &'a Path,
+    pub folder: Option<&'a Path>,
+    pub lines: Vec<String>,
+}
+
+/// Open the editor for a new note `name` (typed as `note:` in an input). Returns false if it stayed empty.
+pub fn note_via_editor(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::Result<bool> {
+    let n = prepare_note(todo, folder, name)?;
+    edit_in_editor(&n.local)?;
+    let has = note_nonempty(&n);
+    finish_note(&n)?;
+    Ok(has)
+}
+
 /// Delete the note files of a removed task, unless another line still uses the name.
 pub fn remove_note(todo: &Path, folder: Option<&Path>, removed: &str, remaining: &[String]) {
     let remote = crate::webdav::is_remote(&todo.to_string_lossy());

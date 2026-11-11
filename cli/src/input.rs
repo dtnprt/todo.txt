@@ -294,6 +294,34 @@ impl LineInput {
         true
     }
 
+    /// True when the cursor is right behind a complete word `note:` (just typed).
+    pub fn note_trigger(&self) -> bool {
+        let (_, end, word) = self.word_at_cursor();
+        word == "note:" && end == self.cursor
+    }
+
+    /// Finish the `note:` word at the cursor: `Some(name)` makes it `note:NAME`, `None` removes it.
+    pub fn set_note_word(&mut self, name: Option<&str>) {
+        let (start, end, word) = self.word_at_cursor();
+        if word != "note:" {
+            return;
+        }
+        match name {
+            Some(n) => self.replace_range(start, end, &format!("note:{n}")),
+            None => {
+                self.checkpoint();
+                let c = self.chars();
+                let mut end = end;
+                if end < c.len() && c[end].is_whitespace() {
+                    end += 1;
+                }
+                let out: String = c[..start].iter().chain(c[end..].iter()).collect();
+                self.set_text(out, start);
+                self.snap(false);
+            }
+        }
+    }
+
     /// `(a) ` at the very start becomes `(A) `. Returns true if something changed.
     pub fn fix_priority_case(&mut self) -> bool {
         let fixed = todotxt::fix_priority_case(&self.text);

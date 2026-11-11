@@ -424,7 +424,7 @@ async function save({ as = false } = {}) {
         state.path = p;
         state.fileName = baseName(p);
         davEtag = null;
-        rememberFile(p);
+        rememberFile(p, true);
       }
       await writeAny(p, text);
       diskText = text;
@@ -531,8 +531,25 @@ async function setCfg(key, value) {
   } catch (e) { console.warn('Could not update todo.cfg:', e); }
 }
 
-/** Remember the open file in todo.cfg (`file=`) and add it to the list of files (`files=["…","…"]`, JSON). */
-function rememberFile(path) {
+const dirOf = (p) => p.replace(/\\/g, '/').replace(/\/[^/]*$/, '').toLowerCase();
+
+/** The `file=` currently stored in todo.cfg (or null). */
+async function cfgFile() {
+  if (!isTauri || !tauri.path) return null;
+  try {
+    const m = (await tauri.fs.readTextFile(await cfgPath())).match(/^\s*file\s*=\s*(.+?)\s*$/m);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+/** Remember the open file in todo.cfg (`file=`) and add it to the list of files (`files=["…","…"]`, JSON).
+ *  A file outside the folder of the remembered one (e.g. the todo.txt of another git repository) is only
+ *  opened, never remembered, unless `force` (switching to a file from the list). */
+async function rememberFile(path, force = false) {
+  if (!force) {
+    const last = await cfgFile();
+    if (last && dirOf(last) !== dirOf(path)) return;
+  }
   setCfg('file', path);
   if (!state.files.includes(path)) {
     state.files.push(path);
@@ -560,7 +577,7 @@ const dav = createWebdav({
     state.path = url;
     state.fileName = davName(url);
     davEtag = null;
-    rememberFile(url);
+    rememberFile(url, true);
     await save();
   },
 });
@@ -573,7 +590,7 @@ async function switchFile(p) {
     leaveFolder();
     const r = await readAny(p);
     loadText(r.text, davFileName(p), null, p, r.etag);
-    rememberFile(p);
+    rememberFile(p, true);
   } catch (e) {
     alert(`Could not open ${p}: ${e.message || e}`);
   }
@@ -1043,30 +1060,15 @@ function renderTask({ i, t }, idx) {
   cb.setAttribute('aria-label', 'Completed');
   cb.onchange = () => replaceLine(i, t.done ? T.reopen(t.raw) : T.complete(t.raw));
 
-  // Priority picker: same dropdown component as the File/View menus.
+  // Priority picker: click opens the same popup as the priority button of the touch toolbar (no brackets).
   const priBtn = el('button', {
     type: 'button', className: 'dd-btn pri-btn', disabled: t.done, title: 'Priority',
-  }, t.priority ? `(${t.priority})` : '—');
+  }, t.priority ? t.priority : '—');
   priBtn.dataset.p = t.priority || '';
   priBtn.setAttribute('aria-haspopup', 'true');
-  priBtn.setAttribute('aria-expanded', 'false');
   priBtn.setAttribute('aria-label', 'Priority');
-  const priMenu = el('div', { className: 'dd-menu pri-menu', hidden: true, role: 'menu' });
-  const choose = (L) => replaceLine(i, T.setPriority(t.raw, L));
-  const tick = () => el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' }));
-  const addItem = (L, label) => {
-    const item = el('button', { type: 'button', role: 'menuitemcheckbox', onclick: () => choose(L) }, tick(), ` ${label}`);
-    item.setAttribute('aria-checked', String((t.priority || null) === L));
-    if (L) item.dataset.p = L;
-    priMenu.append(item);
-  };
-  addItem(null, 'None');
-  for (let c = 65; c <= 90; c++) {
-    const L = String.fromCharCode(c);
-    addItem(L, `(${L})`);
-  }
-  const pri = el('div', { className: 'dd pri-dd' }, priBtn, priMenu);
-  wireDropdown(pri);
+  priBtn.onclick = () => togglePrioPopup(priBtn, t.priority || null, (L) => replaceLine(i, T.setPriority(t.raw, L)));
+  const pri = el('div', { className: 'dd pri-dd' }, priBtn);
 
   const body = el('div', { className: 'body', title: 'Double-click to edit' });
   if (state.editing === i) {
@@ -1439,6 +1441,46 @@ const composer = createComposer({
   onSearch: (q) => { state.filter.q = q; render(); },
 });
 
+// ---------- priority popup (touch toolbar button and the priority button of each task) ----------
+let prioPop = null;
+let prioAnchor = null;
+function closePrioPopup() {
+  if (!prioPop) return;
+  prioPop.remove();
+  prioPop = null;
+  prioAnchor = null;
+  document.removeEventListener('mousedown', prioOutside, true);
+  document.removeEventListener('keydown', prioKey, true);
+}
+function prioOutside(e) { if (prioPop && !prioPop.contains(e.target) && !prioAnchor.contains(e.target)) closePrioPopup(); }
+function prioKey(e) { if (e.key === 'Escape') { e.stopPropagation(); closePrioPopup(); } }
+/** Popup with A-D and "none" (plus the current letter if it is outside A-D) above/below `anchor`; `pick(letter|null)`. */
+function togglePrioPopup(anchor, current, pick) {
+  const same = prioAnchor === anchor;
+  closePrioPopup();
+  if (same) return;
+  const mk = (label, title, cls, fn) => {
+    const b = el('button', { type: 'button', className: `tb ${cls}`, title, onclick: fn });
+    b.append(label);
+    b.setAttribute('aria-label', title);
+    return b;
+  };
+  const letters = ['A', 'B', 'C', 'D'];
+  if (current && !letters.includes(current)) letters.push(current);
+  prioAnchor = anchor;
+  prioPop = el('div', { className: 'tb-pop', role: 'menu', 'aria-label': 'Priority' },
+    ...letters.map((L) => mk(L, `Priority ${L}`, `tb-p tk-p${L}`, () => { closePrioPopup(); pick(L); })),
+    mk(el('i', { className: 'fa-solid fa-ban' }), 'No priority', 'tb-p', () => { closePrioPopup(); pick(null); }));
+  prioPop.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  document.body.append(prioPop);
+  const r = anchor.getBoundingClientRect();
+  const pr = prioPop.getBoundingClientRect();
+  prioPop.style.left = `${Math.max(4, Math.min(r.left, innerWidth - pr.width - 4))}px`;
+  prioPop.style.top = `${r.top - pr.height - 6 >= 4 ? r.top - pr.height - 6 : r.bottom + 6}px`;
+  document.addEventListener('mousedown', prioOutside, true);
+  document.addEventListener('keydown', prioKey, true);
+}
+
 // ---------- touch toolbar: buttons under the input that edit the text being typed (priority, +project, @context, due, note) ----------
 {
   const input = $('#addInput');
@@ -1475,27 +1517,8 @@ const composer = createComposer({
     return b;
   };
   const ic = (n) => el('i', { className: `fa-solid fa-${n}` });
-  // priority: one button that opens an overlay with the choices (fixed position, the bar scrolls and would clip it)
-  let prioPop = null;
-  const closePrio = () => { if (prioPop) { prioPop.remove(); prioPop = null; document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', onKey, true); } };
-  const outside = (e) => { if (prioPop && !prioPop.contains(e.target) && !e.target.closest('.tb-prio')) closePrio(); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closePrio(); } };
-  const togglePrio = (anchor) => {
-    if (prioPop) { closePrio(); return; }
-    prioPop = el('div', { className: 'tb-pop', role: 'menu', 'aria-label': 'Priority' },
-      ...['A', 'B', 'C', 'D'].map((L) => btn(L, `Priority ${L}`, () => { setPrio(L); closePrio(); }, `tb-p tk-p${L}`)),
-      btn(ic('ban'), 'No priority', () => { setPrio(null); closePrio(); }, 'tb-p'));
-    prioPop.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
-    document.body.append(prioPop);
-    const r = anchor.getBoundingClientRect();
-    const pr = prioPop.getBoundingClientRect();
-    prioPop.style.left = `${Math.max(4, Math.min(r.left, innerWidth - pr.width - 4))}px`;
-    prioPop.style.top = `${r.top - pr.height - 6 >= 4 ? r.top - pr.height - 6 : r.bottom + 6}px`;
-    document.addEventListener('mousedown', outside, true);
-    document.addEventListener('keydown', onKey, true);
-  };
   bar.append(
-    btn([ic('arrow-up-wide-short'), ' prio'], 'Priority', (e) => togglePrio(e.currentTarget), 'tb-w tb-prio'),
+    btn([ic('arrow-up-wide-short'), ' prio'], 'Priority', (e) => togglePrioPopup(e.currentTarget, null, setPrio), 'tb-w tb-prio'),
     btn([ic('folder-tree'), ' +'], 'Project (+name)', () => insert('+'), 'tb-w'),
     btn([ic('at'), ''], 'Context (@name)', () => insert('@'), 'tb-w'),
     btn([ic('calendar-day'), ' due'], 'Due date (opens the calendar)', () => insert('due:'), 'tb-w'),
@@ -1674,6 +1697,12 @@ $('#open').onclick = openFile;
 $('#new').onclick = () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };
 $('#save').onclick = () => save();
 $('#saveAs').onclick = () => save({ as: true });
+$('#keepFile').style.display = isTauri ? '' : 'none';
+$('#keepFile').onclick = async () => {
+  if (!state.path) return alert('Save the list to a file first.');
+  await rememberFile(state.path, true);
+  renderFileList();
+};
 $('#archive').onclick = archiveDone;
 $('#refresh').onclick = () => checkExternalChange(true);
 $('#fileInput').onchange = (e) => {

@@ -16,6 +16,7 @@ mod input;
 mod list;
 mod ops;
 mod store;
+mod switcher;
 mod webdav;
 mod todotxt;
 mod tui;
@@ -132,6 +133,14 @@ struct Cli {
     #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
     webdav_ls: Option<String>,
 
+    /// With -f: remember the file (default + known files) even if it is outside the folder of the remembered one
+    #[arg(short = 'K', long)]
+    keep: bool,
+
+    /// Switch the todo file: without VALUE a menu of known files / folder / WebDAV servers; VALUE = list number, path, URL or part of a known path. Remembered.
+    #[arg(short = 'F', long, value_name = "NUMBER|PATH|URL", num_args = 0..=1, default_missing_value = "")]
+    switch: Option<String>,
+
     /// Use this todo.txt (a path, or a WebDAV URL https://...), or a whole FOLDER of *.txt files (and remember it)
     #[arg(short = 'f', long, value_name = "FILE|FOLDER")]
     file: Option<PathBuf>,
@@ -197,6 +206,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         return webdav_cmds(&cli, &mut cfg);
     }
 
+    // file switcher (menu / number / path), then exit
+    if let Some(arg) = &cli.switch {
+        let current = cfg.file.clone().unwrap_or_else(config::default_todo_file);
+        return switcher::run(arg, &current);
+    }
+
     // Git: pull before anything is read (only with .todo-git.cfg: enabled, auto and pull on)
     let git_switches = cli.git_init || cli.sync || cli.git.is_some() || cli.git_auto.is_some() || !cli.git_set.is_empty();
     let early_dir = match &cli.file {
@@ -246,6 +261,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 f
             }
         }
+        // the last file was on a WebDAV server: use it (also when a folder= is configured from earlier)
+        None if cfg.file.as_ref().is_some_and(|f| webdav::is_remote(&f.to_string_lossy())) => cfg.file.clone().unwrap(),
         None => match cfg.folder.clone().filter(|d| d.is_dir()) {
             Some(d) => {
                 folder = Some(d.clone());
@@ -254,9 +271,22 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             None => cfg.file.clone().unwrap_or_else(config::default_todo_file),
         },
     };
-    if cfg.file.as_ref() != Some(&path) || cfg.folder != folder {
+    // `-f FILE` outside the folder of the remembered file (e.g. a todo.txt in another git repository) is used for
+    // this run only: not stored as `file=`, not added to the known files. Use `todo -F PATH` or `--keep` to remember it.
+    let one_off = cli.file.is_some()
+        && !cli.keep
+        && folder.is_none()
+        && match &cfg.file {
+            Some(last) => switcher::dir_of(&last.to_string_lossy()) != switcher::dir_of(&path.to_string_lossy()) && (webdav::is_remote(&path.to_string_lossy()) || path.exists()),
+            None => false,
+        };
+    let remote_last = cli.file.is_none() && folder.is_none() && cfg.file.as_ref() == Some(&path) && webdav::is_remote(&path.to_string_lossy());
+    if !one_off && !remote_last && (cfg.file.as_ref() != Some(&path) || cfg.folder != folder || (folder.is_none() && !cfg.files.contains(&path))) {
         cfg.file = Some(path.clone());
         cfg.folder = folder.clone();
+        if folder.is_none() && !cfg.files.contains(&path) {
+            cfg.files.push(path.clone()); // known files, for the switcher (todo -F)
+        }
         let _ = cfg.save(); // remembering the file is a convenience, never fatal
     }
 
@@ -341,7 +371,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     // ---- interactive add ----
     if cli.add {
-        match editor::edit_line("add> ", &text, ops::use_color())? {
+        let ctx = folder::NoteCtx { todo: &path, folder: folder.as_deref(), lines: Store::load(&path)?.lines };
+        match editor::edit_line("add> ", &text, ops::use_color(), Some(&ctx))? {
             None => println!("Cancelled."),
             Some(new) => {
                 let new = new.trim();
@@ -365,7 +396,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         let i = store.index_of(n).ok_or_else(|| format!("no task at line {n}"))?;
         let old = store.lines[i].clone();
         let initial = if text.is_empty() { old.clone() } else { text.clone() };
-        match editor::edit_line(&format!("{n}> "), &initial, ops::use_color())? {
+        let ctx = folder::NoteCtx { todo: &path, folder: folder.as_deref(), lines: store.lines.clone() };
+        match editor::edit_line(&format!("{n}> "), &initial, ops::use_color(), Some(&ctx))? {
             None => println!("Cancelled."),
             Some(new) => {
                 let new = norm(new.trim(), today);

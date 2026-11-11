@@ -2,6 +2,7 @@
 //! Enter saves, Esc cancels. Supports the same keys as the TUI input (Ctrl+Backspace removes a
 //! whole word, Ctrl+Z / Ctrl+Y undo / redo, `due:tomorrow` -> date on space, ...).
 
+use crate::folder::{self, NoteCtx};
 use crate::highlight::{highlight};
 use crate::input::LineInput;
 use crate::ops::paint;
@@ -17,7 +18,7 @@ use std::io::{self, IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
 
 /// Returns `Ok(None)` if the user cancelled.
-pub fn edit_line(prompt: &str, initial: &str, color: bool) -> io::Result<Option<String>> {
+pub fn edit_line(prompt: &str, initial: &str, color: bool, notes: Option<&NoteCtx>) -> io::Result<Option<String>> {
     if !io::stdin().is_terminal() {
         // piped input: take one line as the new text
         let mut s = String::new();
@@ -26,13 +27,13 @@ pub fn edit_line(prompt: &str, initial: &str, color: bool) -> io::Result<Option<
     }
     let mut input = LineInput::new(initial);
     terminal::enable_raw_mode()?;
-    let result = run(prompt, &mut input, color);
+    let result = run(prompt, &mut input, color, notes);
     terminal::disable_raw_mode()?;
     println!();
     result
 }
 
-fn run(prompt: &str, input: &mut LineInput, color: bool) -> io::Result<Option<String>> {
+fn run(prompt: &str, input: &mut LineInput, color: bool, notes: Option<&NoteCtx>) -> io::Result<Option<String>> {
     let mut out = io::stdout();
     let today = todotxt::today();
     loop {
@@ -48,6 +49,21 @@ fn run(prompt: &str, input: &mut LineInput, color: bool) -> io::Result<Option<St
             KeyCode::Char('c') | KeyCode::Char('q') if ctrl => return Ok(None),
             _ => {
                 input.handle_key(k, today);
+                if let (KeyCode::Char(':'), Some(ctx)) = (k.code, notes) {
+                    if input.note_trigger() {
+                        // like the GUI: a note editor opens after typing `note:`
+                        let name = folder::next_note_name_with(&ctx.lines, &input.text, ctx.folder);
+                        terminal::disable_raw_mode()?;
+                        println!();
+                        let res = folder::note_via_editor(ctx.todo, ctx.folder, &name);
+                        terminal::enable_raw_mode()?;
+                        match res {
+                            Ok(true) => input.set_note_word(Some(&name)),
+                            Ok(false) => input.set_note_word(None),
+                            Err(_) => input.set_note_word(None),
+                        }
+                    }
+                }
             }
         }
     }

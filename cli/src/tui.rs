@@ -183,6 +183,8 @@ struct App {
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
     pending_editor: Option<folder::NoteFile>,
+    /// Name of the note being written for a `note:` typed into the bar (finishes the word afterwards).
+    pending_word: Option<String>,
     store: Store,
     undo: Vec<Vec<String>>,
     sort: Sort,
@@ -222,6 +224,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         picker: None,
         git_menu: None,
         pending_editor: None,
+        pending_word: None,
         store,
         undo: Vec::new(),
         sort,
@@ -268,6 +271,12 @@ impl App {
                 ratatui::restore();
                 let res = folder::edit_in_editor(&n.local);
                 *terminal = ratatui::init();
+                let has = folder::note_nonempty(&n);
+                if let Some(name) = self.pending_word.take() {
+                    // `note:` typed in the bar: it becomes note:NAME, or disappears if the note is empty
+                    self.input.set_note_word(if res.is_ok() && has { Some(&name) } else { None });
+                    self.on_input_changed();
+                }
                 self.msg = Some(match res.and_then(|_| folder::finish_note(&n)) {
                     Ok(()) => {
                         self.git_commit();
@@ -397,6 +406,10 @@ impl App {
             self.leave_search();
         }
         self.assist = None;
+        if crate::webdav::is_remote(&self.path.to_string_lossy()) && self.folder.is_none() {
+            self.msg = Some("WebDAV file: switch with `todo -F` (menu with server browser)".into());
+            return;
+        }
         let dir = self
             .folder
             .clone()
@@ -1004,6 +1017,20 @@ impl App {
                 self.git_menu = if self.git_menu.is_some() { None } else { Some(0) };
                 return;
             }
+            KeyCode::F(12) => {
+                // add the open file to the known files and make it the default (a file opened with -f from
+                // another folder is otherwise only used for this run)
+                let (p, f) = (self.path.clone(), self.folder.clone());
+                config::update(|c| {
+                    c.file = Some(p.clone());
+                    c.folder = f.clone();
+                    if f.is_none() && !c.files.contains(&p) {
+                        c.files.push(p);
+                    }
+                });
+                self.msg = Some(format!("Remembered: {}", self.path.display()));
+                return;
+            }
             KeyCode::F(8) => {
                 if self.picker.is_some() {
                     self.picker = None;
@@ -1155,7 +1182,20 @@ impl App {
                 match self.input.handle_key(k, today) {
                     Edited::No => {}
                     Edited::Moved => self.refresh_assist(),
-                    Edited::Yes => self.on_input_changed(),
+                    Edited::Yes => {
+                        self.on_input_changed();
+                        if k.code == KeyCode::Char(':') && self.mode != Mode::Search && self.input.note_trigger() {
+                            let name = folder::next_note_name_with(&self.store.lines, &self.input.text, self.folder.as_deref());
+                            match folder::prepare_note(&self.path, self.folder.as_deref(), &name) {
+                                Ok(n) => {
+                                    self.pending_editor = Some(n);
+                                    self.pending_word = Some(name);
+                                    self.assist = None;
+                                }
+                                Err(e) => self.msg = Some(format!("Could not create note file: {e}")),
+                            }
+                        }
+                    }
                     Edited::Word(_) => {
                         self.dismissed = None; // let the tag / context menu open right away
                         self.on_input_changed();
@@ -1615,6 +1655,7 @@ impl App {
             "Dates:     due:tomorrow  due:+3d  due:next week  due:24.12.  due:24.12.2026",
             "Global:    F2 sort   F3 show/hide done   F4 sidebar   F5 archive done",
             "           F6 calendar on/off   F7 note of the task   F8 file / folder selector",
+            "           F12 remember this file (add to known files, make it the default)",
             "           F11 status line on/off",
             "           F9 git sync now   F10 git settings (support, auto, pull, commit, push, init;",
             "           stored in .todo-git.cfg of the folder, same as the desktop app)",
