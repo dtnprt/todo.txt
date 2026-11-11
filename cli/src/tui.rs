@@ -1885,7 +1885,7 @@ impl App {
 }
 
 /// "server - folder/file" for a WebDAV address: the host of the configured server and the path below its base URL.
-fn dav_label(url: &str) -> String {
+pub(crate) fn dav_label(url: &str) -> String {
     let after_scheme = url.split_once("://").map_or(url, |x| x.1);
     let (host, path) = after_scheme.split_once('/').unwrap_or((after_scheme, ""));
     let base_path = crate::store::server_of(std::path::Path::new(url))

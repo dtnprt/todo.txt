@@ -531,7 +531,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         };
         // --text / --plain show the file as it is unless a sort order is requested
         let sort = if style == Style::Pretty || sort_arg.is_some() { default_sort } else { Sort::File };
-        ops::print_list(&store.lines, sort, style, &file_name, folder.as_deref(), &filter, cli.all, cli.verbose);
+        let p_str = path.to_string_lossy().into_owned();
+        let header = if p_str.starts_with("http://") || p_str.starts_with("https://") { tui::dav_label(&p_str) } else { file_name.clone() };
+        ops::print_list(&store.lines, sort, style, &file_name, &header, folder.as_deref(), &filter, cli.all, cli.verbose);
         return Ok(());
     }
 

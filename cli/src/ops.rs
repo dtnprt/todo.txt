@@ -76,10 +76,16 @@ fn dim(s: &str, color: bool) -> String {
     if color { format!("\x1b[90m{s}\x1b[0m") } else { s.to_string() }
 }
 
-pub fn print_list(lines: &[String], sort: Sort, style: Style, file_name: &str, folder: Option<&std::path::Path>, filter: &Filter, show_done: bool, verbose: bool) {
+pub fn print_list(lines: &[String], sort: Sort, style: Style, file_name: &str, header: &str, folder: Option<&std::path::Path>, filter: &Filter, show_done: bool, verbose: bool) {
     let color = use_color();
     let today = todotxt::iso(todotxt::today());
     let order = list::view(lines, sort, show_done || style != Style::Pretty, filter);
+    if style == Style::Pretty {
+        // short file name, then a thin rule as long as the name (at least 12 characters)
+        let n = header.chars().count().clamp(12, 60);
+        println!("{}", dim(header, color));
+        println!("{}", dim(&"─".repeat(n), color));
+    }
     for &i in &order {
         let raw = &lines[i];
         match style {
