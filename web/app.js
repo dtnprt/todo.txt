@@ -1494,6 +1494,8 @@ function render() {
   $('#scrim').hidden = !(isAndroid && showSide);
   $('#sideToggle').setAttribute('aria-checked', state.sidebar);
   $('#sideToggle').disabled = !listMode;
+  $('#sideBtn').disabled = !listMode;
+  $('#sideBtn').classList.toggle('active', state.sidebar);
   $('#status').hidden = !listMode;
   document.title = state.fileName + (state.dirty ? '*' : '') + ' – todo.txt' + (appVersion ? `  v${appVersion}` : '');
   if (isTauri && tauri.window) {
@@ -1994,6 +1996,7 @@ $('#lineNoToggle').onclick = () => {
   render();
 };
 $('#sideToggle').onclick = () => { state.sidebar = !state.sidebar; persist(); render(); };
+$('#sideBtn').onclick = () => { state.sidebar = !state.sidebar; persist(); render(); };
 // Dropdown menus (File, View): one open at a time.
 const closeMenus = () => document.querySelectorAll('.dd').forEach((d) => {
   const m = d.querySelector('.dd-menu');

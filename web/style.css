@@ -386,6 +386,7 @@ input, textarea, .note-field, .note-field * { -webkit-user-select: text; user-se
 
 /* ---- Android app ---- */
 body:not(.android) .android-only { display: none !important; }
+body.android .desktop-only { display: none !important; }
 body.android .android-only { display: inline-flex; }
 body.android { font-size: 16px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; overscroll-behavior: none; }
 body.android input, body.android textarea, body.android select { font-size: 16px; }   /* no zoom-in when focusing */
