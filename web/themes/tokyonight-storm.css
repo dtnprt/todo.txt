@@ -1,0 +1,23 @@
+/* Tokyo Night Storm - a complete theme in one file (system fonts). */
+:root {
+  --bg: #24283b;
+  --panel: #1f2335;
+  --hover: #2f354f;
+  --line: #3b4261;
+  --text: #c0caf5;
+  --muted: #8089b3;
+  --accent: #7aa2f7;
+  --accent-text: #1f2335;
+  --danger: #f7768e;
+  --warn: #ff9e64;
+  --ok: #9ece6a;
+  --pA: #f7768e;
+  --pB: #ff9e64;
+  --pC: #e0af68;
+  --pD: #9ece6a;
+  --pX: #565f89;
+  --due-soon: #e0af68;
+  --due-today: #ff9e64;
+  --due-over: #f7768e;
+  color-scheme: dark;
+}

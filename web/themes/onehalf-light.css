@@ -1,0 +1,23 @@
+/* One Half Light - a complete theme in one file (system fonts). */
+:root {
+  --bg: #fafafa;
+  --panel: #f0f0f0;
+  --hover: #e5e5e6;
+  --line: #dbdbdc;
+  --text: #383a42;
+  --muted: #696c77;
+  --accent: #0184bc;
+  --accent-text: #fafafa;
+  --danger: #e45649;
+  --warn: #c18401;
+  --ok: #50a14f;
+  --pA: #e45649;
+  --pB: #c18401;
+  --pC: #c18401;
+  --pD: #50a14f;
+  --pX: #a0a1a7;
+  --due-soon: #c18401;
+  --due-today: #c18401;
+  --due-over: #e45649;
+  color-scheme: light;
+}

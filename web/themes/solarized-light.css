@@ -1,0 +1,23 @@
+/* Solarized Light - a complete theme in one file (system fonts). */
+:root {
+  --bg: #fdf6e3;
+  --panel: #eee8d5;
+  --hover: #e4ddc4;
+  --line: #d3cbb0;
+  --text: #586e75;
+  --muted: #657b83;
+  --accent: #268bd2;
+  --accent-text: #fdf6e3;
+  --danger: #dc322f;
+  --warn: #cb4b16;
+  --ok: #859900;
+  --pA: #dc322f;
+  --pB: #cb4b16;
+  --pC: #b58900;
+  --pD: #859900;
+  --pX: #93a1a1;
+  --due-soon: #b58900;
+  --due-today: #cb4b16;
+  --due-over: #dc322f;
+  color-scheme: light;
+}

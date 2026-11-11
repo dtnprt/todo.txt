@@ -1,0 +1,23 @@
+/* Tokyo Night - a complete theme in one file (system fonts). */
+:root {
+  --bg: #1a1b26;
+  --panel: #16161e;
+  --hover: #292e42;
+  --line: #3b4261;
+  --text: #c0caf5;
+  --muted: #787c99;
+  --accent: #7aa2f7;
+  --accent-text: #16161e;
+  --danger: #f7768e;
+  --warn: #ff9e64;
+  --ok: #9ece6a;
+  --pA: #f7768e;
+  --pB: #ff9e64;
+  --pC: #e0af68;
+  --pD: #9ece6a;
+  --pX: #565f89;
+  --due-soon: #e0af68;
+  --due-today: #ff9e64;
+  --due-over: #f7768e;
+  color-scheme: dark;
+}

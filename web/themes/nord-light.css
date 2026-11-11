@@ -1,0 +1,23 @@
+/* Nord (light, Snow Storm) - a complete theme in one file (system fonts). */
+:root {
+  --bg: #e5e9f0;
+  --panel: #eceff4;
+  --hover: #d8dee9;
+  --line: #c2cad9;
+  --text: #2e3440;
+  --muted: #4c566a;
+  --accent: #5e81ac;
+  --accent-text: #eceff4;
+  --danger: #bf616a;
+  --warn: #b4684f;
+  --ok: #6f8f5a;
+  --pA: #bf616a;
+  --pB: #b4684f;
+  --pC: #a98a2f;
+  --pD: #6f8f5a;
+  --pX: #7b88a1;
+  --due-soon: #a98a2f;
+  --due-today: #b4684f;
+  --due-over: #bf616a;
+  color-scheme: light;
+}

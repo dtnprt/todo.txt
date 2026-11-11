@@ -1,0 +1,23 @@
+/* Catppuccin Frappé - a complete theme in one file (system fonts). */
+:root {
+  --bg: #303446;
+  --panel: #292c3c;
+  --hover: #414559;
+  --line: #51576d;
+  --text: #c6d0f5;
+  --muted: #a5adce;
+  --accent: #ca9ee6;
+  --accent-text: #232634;
+  --danger: #e78284;
+  --warn: #ef9f76;
+  --ok: #a6d189;
+  --pA: #e78284;
+  --pB: #ef9f76;
+  --pC: #e5c890;
+  --pD: #a6d189;
+  --pX: #737994;
+  --due-soon: #e5c890;
+  --due-today: #ef9f76;
+  --due-over: #e78284;
+  color-scheme: dark;
+}

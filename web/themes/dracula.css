@@ -1,0 +1,23 @@
+/* Dracula - a complete theme in one file (system fonts). */
+:root {
+  --bg: #282a36;
+  --panel: #21222c;
+  --hover: #44475a;
+  --line: #44475a;
+  --text: #f8f8f2;
+  --muted: #a0a8d0;
+  --accent: #bd93f9;
+  --accent-text: #282a36;
+  --danger: #ff5555;
+  --warn: #ffb86c;
+  --ok: #50fa7b;
+  --pA: #ff5555;
+  --pB: #ffb86c;
+  --pC: #f1fa8c;
+  --pD: #50fa7b;
+  --pX: #6272a4;
+  --due-soon: #f1fa8c;
+  --due-today: #ffb86c;
+  --due-over: #ff5555;
+  color-scheme: dark;
+}

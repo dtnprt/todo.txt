@@ -1,0 +1,1653 @@
+//! Interactive terminal UI: the same layout and features as the web app.
+//!
+//!  - sidebar with tag / context / priority filters, task list, one bar at the bottom for
+//!    adding (default), searching (`/`) and editing a task
+//!  - the bar highlights priority, dates, +tags, @contexts and due:, completes tags / contexts /
+//!    priorities, shows a calendar while a date is typed and converts `due:tomorrow`, `due:+3d`,
+//!    `due:24.12.` ... to a real date
+//!  - every change is written to the file immediately; Ctrl+Z undoes it
+
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use chrono::{Datelike, Duration as Days, NaiveDate};
+use ratatui::{
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    layout::{Constraint, Layout, Position, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    DefaultTerminal, Frame,
+};
+use unicode_width::UnicodeWidthStr;
+
+use crate::config;
+use crate::folder;
+use crate::git;
+use crate::highlight::{highlight, Tok};
+use crate::input::{Edited, LineInput};
+use crate::list::{self, Filter, Sort};
+use crate::store::Store;
+use crate::todotxt::{self, DueStatus};
+
+const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November",
+    "December",
+];
+
+fn pri_color(c: char) -> Color {
+    match c {
+        'A' => Color::Red,
+        'B' => Color::Indexed(208),
+        'C' => Color::Yellow,
+        'D' => Color::Green,
+        _ => Color::Gray,
+    }
+}
+
+fn tok_style(tok: Tok) -> Style {
+    match tok {
+        Tok::Plain => Style::default(),
+        Tok::Priority('\0') => Style::default().fg(Color::Gray),
+        Tok::Priority(c) => Style::default().fg(pri_color(c)).add_modifier(Modifier::BOLD),
+        Tok::Done => Style::default().fg(Color::Green),
+        Tok::Date | Tok::Meta => Style::default().fg(Color::Gray),
+        Tok::Project => Style::default().fg(Color::LightBlue),
+        Tok::Context => Style::default().fg(Color::Green),
+        Tok::Due => Style::default().fg(Color::Yellow),
+    }
+}
+
+fn dim() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    List,
+    Sidebar,
+    Input,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Add,
+    Search,
+    /// Editing the line with this index.
+    Edit(usize),
+}
+
+const GIT_ROWS: [(&str, &str); 7] = [
+    ("enabled", "Git support"),
+    ("auto", "Git auto (pull on start, commit + push changes)"),
+    ("pull", "  Auto pull"),
+    ("commit", "  Auto commit"),
+    ("push", "  Auto push"),
+    ("sync", "Git sync now (F9)"),
+    ("init", "Initialize git here..."),
+];
+
+struct Item {
+    value: String,
+    tok: Tok,
+    count: usize,
+}
+
+enum Assist {
+    /// `exact`: the typed word is itself an existing value (then Space / Enter must not complete it).
+    List { start: usize, end: usize, items: Vec<Item>, idx: usize, exact: bool },
+    Cal { start: usize, end: usize, month: NaiveDate, cursor: NaiveDate, selected: Option<NaiveDate> },
+}
+
+#[derive(Clone)]
+enum Side {
+    Project(String),
+    Context(String),
+    Priority(char),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PKind {
+    Up,
+    Dir,
+    File,
+}
+
+struct PEntry {
+    name: String,
+    kind: PKind,
+}
+
+/// The file selector (F8): browse folders, open a todo.txt, or use a whole folder.
+struct Picker {
+    dir: PathBuf,
+    entries: Vec<PEntry>,
+    state: ListState,
+}
+
+impl Picker {
+    fn new(dir: PathBuf, select: Option<&str>) -> Picker {
+        let mut entries = Vec::new();
+        if dir.parent().is_some() {
+            entries.push(PEntry { name: "..".into(), kind: PKind::Up });
+        }
+        let mut dirs: Vec<String> = Vec::new();
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if let Ok(meta) = e.metadata() {
+                    if meta.is_dir() && !folder::is_hidden(&name, &meta) {
+                        dirs.push(name);
+                    }
+                }
+            }
+        }
+        dirs.sort_by_key(|n| n.to_lowercase());
+        entries.extend(dirs.into_iter().map(|name| PEntry { name, kind: PKind::Dir }));
+        for p in folder::list_txt_files(&dir) {
+            if let Some(n) = p.file_name() {
+                entries.push(PEntry { name: n.to_string_lossy().into_owned(), kind: PKind::File });
+            }
+        }
+        let idx = select.and_then(|n| entries.iter().position(|e| e.name == n)).unwrap_or(0);
+        let mut state = ListState::default();
+        state.select(Some(idx));
+        Picker { dir, entries, state }
+    }
+
+    fn idx(&self) -> usize {
+        self.state.selected().unwrap_or(0)
+    }
+
+    fn move_by(&mut self, d: isize) {
+        let n = self.entries.len() as isize;
+        if n > 0 {
+            self.state.select(Some((self.idx() as isize + d).clamp(0, n - 1) as usize));
+        }
+    }
+}
+
+struct App {
+    path: PathBuf,
+    /// Folder mode: the folder whose *.txt files can be switched between (F8).
+    folder: Option<PathBuf>,
+    /// Git status of the folder for the status bar (refreshed every 2 s).
+    git_status: Option<git::Status>,
+    git_checked: Instant,
+    /// File content as last read or written, to notice changes made by other programs.
+    disk_text: String,
+    last_check: Instant,
+    picker: Option<Picker>,
+    /// F10 git settings popup: selected row.
+    git_menu: Option<usize>,
+    pending_editor: Option<PathBuf>,
+    store: Store,
+    undo: Vec<Vec<String>>,
+    sort: Sort,
+    show_done: bool,
+    show_sidebar: bool,
+    calendar: bool,
+    /// Status line at the bottom (F11).
+    show_status: bool,
+    filter: Filter,
+    view: Vec<usize>,
+    sel_pos: usize,
+    sel_line: Option<usize>,
+    list_state: ListState,
+    side_idx: usize,
+    focus: Focus,
+    mode: Mode,
+    input: LineInput,
+    add_draft: String,
+    assist: Option<Assist>,
+    dismissed: Option<(usize, String)>,
+    msg: Option<String>,
+    help: bool,
+    quit: bool,
+}
+
+pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()> {
+    let store = Store::load(&path)?;
+    let cfg = config::Config::load();
+    let disk_text = fs::read_to_string(&path).unwrap_or_default();
+    let mut app = App {
+        path,
+        folder,
+        git_status: None,
+        git_checked: Instant::now() - Duration::from_secs(60),
+        disk_text,
+        last_check: Instant::now(),
+        picker: None,
+        git_menu: None,
+        pending_editor: None,
+        store,
+        undo: Vec::new(),
+        sort,
+        show_done: cfg.show_done.unwrap_or(true),
+        show_sidebar: cfg.sidebar.unwrap_or(true),
+        calendar: cfg.calendar.unwrap_or(true),
+        show_status: cfg.statusbar.unwrap_or(true),
+        filter: Filter::default(),
+        view: Vec::new(),
+        sel_pos: 0,
+        sel_line: None,
+        list_state: ListState::default(),
+        side_idx: 0,
+        focus: Focus::Input,
+        mode: Mode::Add,
+        input: LineInput::new(""),
+        add_draft: String::new(),
+        assist: None,
+        dismissed: None,
+        msg: None,
+        help: false,
+        quit: false,
+    };
+    app.reload_view();
+    let mut terminal = ratatui::init();
+    let res = app.event_loop(&mut terminal);
+    ratatui::restore();
+    res
+}
+
+impl App {
+    fn event_loop(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        while !self.quit {
+            terminal.draw(|f| self.draw(f))?;
+            if event::poll(Duration::from_millis(500))? {
+                if let Event::Key(k) = event::read()? {
+                    if k.kind != KeyEventKind::Release {
+                        self.on_key(k);
+                    }
+                }
+            }
+            if let Some(p) = self.pending_editor.take() {
+                // give the terminal to the editor, then take it back
+                ratatui::restore();
+                let res = folder::edit_in_editor(&p);
+                *terminal = ratatui::init();
+                self.msg = Some(match res {
+                    Ok(()) => {
+                        self.git_commit();
+                        format!("Note saved: {}", p.display())
+                    }
+                    Err(e) => format!("Editor failed: {e}"),
+                });
+                if fs::metadata(&p).is_ok_and(|m| m.len() == 0) {
+                    let _ = fs::remove_file(&p); // an empty note file is not worth keeping
+                }
+            }
+            if let Some(m) = git::take_result() {
+                self.msg = Some(m); // outcome of a background push
+            }
+            if self.git_checked.elapsed() >= Duration::from_secs(2) {
+                self.refresh_git_status();
+            }
+            if self.last_check.elapsed() >= Duration::from_secs(1) {
+                self.check_external();
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh_git_status(&mut self) {
+        self.git_checked = Instant::now();
+        self.git_status = self.folder.as_deref().and_then(git::status);
+    }
+
+    /// Reload the file when another program changed it (the TUI saves every change at once, so
+    /// there is never unsaved work). The reload is an undoable step.
+    fn check_external(&mut self) {
+        self.last_check = Instant::now();
+        if matches!(self.mode, Mode::Edit(_)) {
+            return;
+        }
+        let Ok(text) = fs::read_to_string(&self.path) else { return };
+        if text == self.disk_text {
+            return;
+        }
+        self.disk_text = text;
+        if let Ok(new) = Store::load(&self.path) {
+            if new.lines != self.store.lines {
+                let old = std::mem::replace(&mut self.store, new);
+                self.undo.push(old.lines);
+                if self.undo.len() > 200 {
+                    self.undo.remove(0);
+                }
+                self.reload_view();
+                self.msg = Some("File changed on disk: reloaded (Ctrl+Z undoes)".into());
+            }
+        }
+    }
+
+    /// Remember the view settings (sort, completed, sidebar, calendar) in the config file.
+    fn save_view(&self) {
+        let (sort, done, side, cal, status) = (self.sort, self.show_done, self.show_sidebar, self.calendar, self.show_status);
+        config::update(|c| {
+            c.sort = Some(sort.name().to_string());
+            c.show_done = Some(done);
+            c.sidebar = Some(side);
+            c.calendar = Some(cal);
+            c.statusbar = Some(status);
+        });
+    }
+
+    /// Open another todo.txt (`folder` = Some(dir) keeps / enters folder mode).
+    fn switch_file(&mut self, path: PathBuf, folder: Option<PathBuf>) {
+        // entering another folder: pull first (same as the desktop app), before the data is read
+        if let Some(d) = folder.as_ref().filter(|d| self.folder.as_ref() != Some(*d)) {
+            match git::auto_start(d, false) {
+                Ok(m) if !m.is_empty() => git::post(&m),
+                Err(e) => git::post(&format!("git: {e}")),
+                _ => {}
+            }
+        }
+        match Store::load(&path) {
+            Ok(store) => {
+                self.disk_text = fs::read_to_string(&path).unwrap_or_default();
+                self.store = store;
+                self.undo.clear();
+                self.filter.clear();
+                self.sel_line = None;
+                self.sel_pos = 0;
+                self.mode = Mode::Add;
+                self.reload_view();
+                let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                let (p2, f2) = (path.clone(), folder.clone());
+                config::update(|c| {
+                    c.file = Some(p2);
+                    c.folder = f2;
+                });
+                self.path = path;
+                self.folder = folder;
+                self.msg = Some(format!("Opened {name}"));
+            }
+            Err(e) => self.msg = Some(format!("Could not open {}: {e}", path.display())),
+        }
+    }
+
+    /// F7: edit the note of the selected task in the editor (adds `note:NAME` if missing).
+    fn edit_note(&mut self) {
+        if matches!(self.mode, Mode::Edit(_)) {
+            return;
+        }
+        let Some(i) = self.sel_line else { return };
+        let t = todotxt::parse(&self.store.lines[i]);
+        let name = match folder::note_name(&t.tags) {
+            Some(n) => n,
+            None => {
+                let n = folder::unique_note_name(&folder::slugify(&t.text), &self.store.lines, self.folder.as_deref());
+                let raw = format!("{} note:{n}", self.store.lines[i]);
+                self.replace_line(i, raw);
+                n
+            }
+        };
+        match folder::ensure_note_file(self.folder.as_deref(), &name) {
+            Ok(p) => self.pending_editor = Some(p),
+            Err(e) => self.msg = Some(format!("Could not create note file: {e}")),
+        }
+    }
+
+    // ---------------------------------------------------------------- file selector
+
+    fn open_picker(&mut self) {
+        if matches!(self.mode, Mode::Edit(_)) {
+            return;
+        }
+        if self.mode == Mode::Search {
+            self.leave_search();
+        }
+        self.assist = None;
+        let dir = self
+            .folder
+            .clone()
+            .or_else(|| self.path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let cur = self.path.file_name().map(|n| n.to_string_lossy().into_owned());
+        self.picker = Some(Picker::new(dir, cur.as_deref()));
+    }
+
+    fn picker_key(&mut self, k: KeyEvent) {
+        let Some(pk) = &mut self.picker else { return };
+        match k.code {
+            KeyCode::Esc => self.picker = None,
+            KeyCode::Up => pk.move_by(-1),
+            KeyCode::Down => pk.move_by(1),
+            KeyCode::PageUp => pk.move_by(-10),
+            KeyCode::PageDown => pk.move_by(10),
+            KeyCode::Home => pk.move_by(isize::MIN / 2),
+            KeyCode::End => pk.move_by(isize::MAX / 2),
+            KeyCode::Backspace | KeyCode::Left => {
+                if let Some(parent) = pk.dir.parent().map(|p| p.to_path_buf()) {
+                    let from = pk.dir.file_name().map(|n| n.to_string_lossy().into_owned());
+                    *pk = Picker::new(parent, from.as_deref());
+                }
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                // use the shown directory as the folder (all its *.txt files)
+                let dir = pk.dir.clone();
+                let remembered = self.path.clone();
+                self.picker = None;
+                let file = folder::pick_file(&dir, Some(&remembered));
+                self.switch_file(file, Some(dir));
+            }
+            KeyCode::Enter | KeyCode::Right => {
+                let Some(e) = pk.entries.get(pk.idx()) else { return };
+                match e.kind {
+                    PKind::Up => {
+                        if let Some(parent) = pk.dir.parent().map(|p| p.to_path_buf()) {
+                            let from = pk.dir.file_name().map(|n| n.to_string_lossy().into_owned());
+                            *pk = Picker::new(parent, from.as_deref());
+                        }
+                    }
+                    PKind::Dir => {
+                        let dir = pk.dir.join(&e.name);
+                        *pk = Picker::new(dir, None);
+                    }
+                    PKind::File if k.code == KeyCode::Enter => {
+                        let path = pk.dir.join(&e.name);
+                        // staying in the folder keeps folder mode; a file elsewhere leaves it
+                        let folder = if self.folder.as_deref() == Some(pk.dir.as_path()) { self.folder.clone() } else { None };
+                        self.picker = None;
+                        self.switch_file(path, folder);
+                    }
+                    PKind::File => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ---------------------------------------------------------------- model
+
+    fn today(&self) -> NaiveDate {
+        todotxt::today()
+    }
+
+    fn reload_view(&mut self) {
+        let keep = self.sel_line;
+        self.view = list::view(&self.store.lines, self.sort, self.show_done, &self.filter);
+        let pos = keep.and_then(|l| self.view.iter().position(|&i| i == l)).unwrap_or(self.sel_pos);
+        self.select_pos(pos);
+    }
+
+    fn select_pos(&mut self, p: usize) {
+        if self.view.is_empty() {
+            self.sel_pos = 0;
+            self.sel_line = None;
+            self.list_state.select(None);
+        } else {
+            let p = p.min(self.view.len() - 1);
+            self.sel_pos = p;
+            self.sel_line = Some(self.view[p]);
+            self.list_state.select(Some(p));
+        }
+    }
+
+    fn move_sel(&mut self, delta: isize) {
+        let p = (self.sel_pos as isize + delta).clamp(0, self.view.len().saturating_sub(1) as isize);
+        self.select_pos(p as usize);
+    }
+
+    fn save(&mut self) {
+        match self.store.save(&self.path) {
+            Ok(()) => {
+                self.disk_text = self.store.text();
+                self.git_commit();
+                self.refresh_git_status(); // status line shows the new git state at once
+            }
+            Err(e) => self.msg = Some(format!("Could not save: {e}")),
+        }
+    }
+
+    /// The git repository of the todo folder, if folder mode is on and the folder is one.
+    fn git_dir(&self) -> Option<PathBuf> {
+        self.folder.clone().filter(|d| d.join(".git").exists())
+    }
+
+    /// After a change: commit and (in the background) push, if `.todo-git.cfg` has git + auto on.
+    fn git_commit(&mut self) {
+        if let Some(dir) = self.git_dir() {
+            let name = self.path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            match git::auto_change(&dir, &format!("todo: update {name}"), true, false) {
+                Ok(m) if !m.is_empty() => self.msg = Some(m),
+                Err(e) => self.msg = Some(format!("git: {e}")),
+                _ => {}
+            }
+        }
+    }
+
+    /// F9: commit, pull, push.
+    fn git_sync(&mut self) {
+        let Some(dir) = self.git_dir() else {
+            self.msg = Some("F9 git sync needs folder mode in a git repository (todo -f FOLDER, todo --git-init)".into());
+            return;
+        };
+        self.msg = Some(match git::sync(&dir, false) {
+            Ok(s) => format!("git: {s}"),
+            Err(e) => format!("git: {e}"),
+        });
+        self.check_external(); // a pull may have changed the open file
+    }
+
+    /// Replace the whole list (one undo step) and write the file.
+    fn commit(&mut self, lines: Vec<String>) {
+        self.undo.push(std::mem::replace(&mut self.store.lines, lines));
+        if self.undo.len() > 200 {
+            self.undo.remove(0);
+        }
+        self.save();
+        self.reload_view();
+    }
+
+    fn replace_line(&mut self, i: usize, raw: String) {
+        let mut lines = self.store.lines.clone();
+        lines[i] = raw;
+        self.commit(lines);
+    }
+
+    fn undo_list(&mut self) {
+        match self.undo.pop() {
+            Some(prev) => {
+                self.store.lines = prev;
+                self.save();
+                self.reload_view();
+                self.msg = Some("Undone".into());
+            }
+            None => self.msg = Some("Nothing to undo".into()),
+        }
+    }
+
+    fn toggle_done(&mut self) {
+        let Some(i) = self.sel_line else { return };
+        let raw = self.store.lines[i].clone();
+        let new = if todotxt::parse(&raw).done {
+            todotxt::reopen(&raw)
+        } else {
+            todotxt::complete(&raw, &todotxt::iso(self.today()))
+        };
+        self.replace_line(i, new);
+    }
+
+    fn delete_selected(&mut self) {
+        let Some(i) = self.sel_line else { return };
+        let mut lines = self.store.lines.clone();
+        let gone = lines.remove(i);
+        self.commit(lines);
+        folder::remove_note(self.folder.as_deref(), &gone, &self.store.lines);
+        self.msg = Some(format!("Deleted: {gone}  (note file removed)"));
+    }
+
+    /// Alt+Up / Alt+Down: raise or lower the priority of the selected open task.
+    fn shift_priority(&mut self, raise: bool) {
+        let Some(i) = self.sel_line else { return };
+        let raw = self.store.lines[i].clone();
+        let t = todotxt::parse(&raw);
+        if t.done {
+            return;
+        }
+        let new = if raise {
+            match t.priority {
+                None => Some('C'),
+                Some('A') => Some('A'),
+                Some(c) => Some((c as u8 - 1) as char),
+            }
+        } else {
+            match t.priority {
+                Some(c) if c < 'C' => Some((c as u8 + 1) as char),
+                _ => None,
+            }
+        };
+        if new != t.priority {
+            self.replace_line(i, todotxt::set_priority(&raw, new));
+        }
+    }
+
+    fn archive_done(&mut self) {
+        let (done, open): (Vec<String>, Vec<String>) =
+            self.store.lines.iter().cloned().partition(|l| todotxt::parse(l).done);
+        if done.is_empty() {
+            self.msg = Some("No completed tasks to archive".into());
+            return;
+        }
+        let target = self.path.with_file_name("done.txt");
+        let crlf = self.store.crlf();
+        let res = OpenOptions::new().create(true).append(true).open(&target).and_then(|mut f| {
+            for l in &done {
+                write!(f, "{l}{}", if crlf { "\r\n" } else { "\n" })?;
+            }
+            Ok(())
+        });
+        match res {
+            Ok(()) => {
+                let n = done.len();
+                self.commit(open);
+                self.msg = Some(format!("Archived {n} task(s) to {}", target.display()));
+            }
+            Err(e) => self.msg = Some(format!("Could not write {}: {e}", target.display())),
+        }
+    }
+
+    /// Sidebar entries. Each section only counts tasks that match the *other* active sidebar filters,
+    /// so with a project selected only the contexts and priorities that exist in it are listed.
+    fn side_entries(&self) -> Vec<(Side, usize)> {
+        let f = &self.filter;
+        let subset = |skip: u8| -> Vec<String> {
+            self.store
+                .lines
+                .iter()
+                .filter(|l| !l.trim().is_empty())
+                .filter(|l| {
+                    let t = todotxt::parse(l);
+                    (skip == 0 || f.project.as_ref().map_or(true, |p| t.projects.contains(p)))
+                        && (skip == 1 || f.context.as_ref().map_or(true, |c| t.contexts.contains(c)))
+                        && (skip == 2 || f.priority.map_or(true, |p| t.priority == Some(p)))
+                })
+                .cloned()
+                .collect()
+        };
+        let mut v = Vec::new();
+        for (n, c) in list::counts(&subset(0), true, |t| t.projects.clone()) {
+            v.push((Side::Project(n), c));
+        }
+        for (n, c) in list::counts(&subset(1), true, |t| t.contexts.clone()) {
+            v.push((Side::Context(n), c));
+        }
+        for (n, c) in list::counts(&subset(2), false, |t| t.priority.map(|p| p.to_string()).into_iter().collect()) {
+            v.push((Side::Priority(n.chars().next().unwrap_or('A')), c));
+        }
+        v
+    }
+
+    fn toggle_side(&mut self, e: &Side) {
+        fn toggle<T: PartialEq + Clone>(slot: &mut Option<T>, v: T) {
+            *slot = if slot.as_ref() == Some(&v) { None } else { Some(v) };
+        }
+        match e {
+            Side::Project(p) => toggle(&mut self.filter.project, p.clone()),
+            Side::Context(c) => toggle(&mut self.filter.context, c.clone()),
+            Side::Priority(p) => toggle(&mut self.filter.priority, *p),
+        }
+        self.reload_view();
+    }
+
+    // ---------------------------------------------------------------- modes
+
+    fn enter_search(&mut self) {
+        if self.mode == Mode::Add {
+            self.add_draft = self.input.text.clone();
+        }
+        self.mode = Mode::Search;
+        let q = self.filter.q.clone();
+        self.input.set(&q);
+        self.focus = Focus::Input;
+        self.assist = None;
+    }
+
+    /// Back to adding; the search filter stays active (shown in the status line).
+    fn leave_search(&mut self) {
+        if self.mode == Mode::Search {
+            self.filter.q = self.input.text.clone();
+            self.mode = Mode::Add;
+            let d = self.add_draft.clone();
+            self.input.set(&d);
+            self.reload_view();
+        }
+        self.assist = None;
+    }
+
+    fn start_edit(&mut self) {
+        let Some(i) = self.sel_line else { return };
+        if self.mode == Mode::Add {
+            self.add_draft = self.input.text.clone();
+        }
+        self.mode = Mode::Edit(i);
+        let raw = self.store.lines[i].clone();
+        self.input.set(&raw);
+        self.focus = Focus::Input;
+        self.refresh_assist();
+    }
+
+    fn finish_edit(&mut self, save: bool) {
+        if let Mode::Edit(i) = self.mode {
+            if save {
+                let v = todotxt::normalize_due(&todotxt::fix_priority_case(self.input.text.trim()), self.today());
+                if v.is_empty() {
+                    let mut lines = self.store.lines.clone();
+                    lines.remove(i);
+                    self.commit(lines);
+                } else if v != self.store.lines[i] {
+                    self.replace_line(i, v);
+                }
+            }
+            self.mode = Mode::Add;
+            let d = self.add_draft.clone();
+            self.input.set(&d);
+        }
+        self.assist = None;
+        self.focus = Focus::List;
+    }
+
+    fn focus_list(&mut self) {
+        if self.mode == Mode::Search {
+            self.leave_search();
+        }
+        self.assist = None;
+        self.focus = Focus::List;
+    }
+
+    fn submit_add(&mut self) {
+        let text = self.input.text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let today = self.today();
+        let line = todotxt::with_creation_date(
+            &todotxt::normalize_due(&todotxt::fix_priority_case(&text), today),
+            &todotxt::iso(today),
+        );
+        let mut lines = self.store.lines.clone();
+        lines.push(line.clone());
+        let new_idx = lines.len() - 1;
+        self.input.set("");
+        self.assist = None;
+        self.commit(lines);
+        // jump to the new task if it is visible
+        if let Some(p) = self.view.iter().position(|&i| i == new_idx) {
+            self.select_pos(p);
+        }
+        self.msg = Some(format!("Added: {line}"));
+    }
+
+    // ---------------------------------------------------------------- assist
+
+    fn on_input_changed(&mut self) {
+        if self.mode == Mode::Search {
+            self.filter.q = self.input.text.clone();
+            self.reload_view();
+        }
+        self.refresh_assist();
+    }
+
+    fn refresh_assist(&mut self) {
+        if self.focus != Focus::Input {
+            self.assist = None;
+            return;
+        }
+        let (start, end, word) = self.input.word_at_cursor();
+        if let Some((s, w)) = &self.dismissed {
+            if *s == start && *w == word {
+                self.assist = None;
+                return;
+            }
+            self.dismissed = None;
+        }
+
+        // priorities (first word), tags, contexts
+        let first = word.chars().next();
+        if matches!(first, Some('+') | Some('@')) || (first == Some('(') && start == 0) {
+            let rest: String = word.chars().skip(1).collect();
+            let all: Vec<Item> = match first {
+                Some('+') => self.words_matching(&rest, |t| t.projects.clone(), true, '+', Tok::Project),
+                Some('@') => self.words_matching(&rest, |t| t.contexts.clone(), true, '@', Tok::Context),
+                _ => {
+                    let prefix = rest.trim_end_matches(')').to_uppercase();
+                    list::counts(&self.store.lines, false, |t| t.priority.map(|p| p.to_string()).into_iter().collect())
+                        .into_iter()
+                        .filter(|(n, _)| n.starts_with(&prefix))
+                        .map(|(n, c)| Item {
+                            tok: Tok::Priority(n.chars().next().unwrap_or('A')),
+                            value: format!("({n})"),
+                            count: c,
+                        })
+                        .collect()
+                }
+            };
+            let exact = all.iter().any(|it| it.value == word);
+            let items: Vec<Item> = all.into_iter().filter(|it| it.value != word).take(8).collect();
+            if items.is_empty() {
+                self.assist = None;
+                return;
+            }
+            let idx = match &self.assist {
+                Some(Assist::List { idx, .. }) => (*idx).min(items.len() - 1),
+                _ => 0,
+            };
+            self.assist = Some(Assist::List { start, end, items, idx, exact });
+            return;
+        }
+
+        // dates: `due`, `due:...` and bare dates outside the leading prefix
+        if self.calendar {
+            if let Some((selected, year, month)) = self.date_hit(start, &word) {
+                let today = self.today();
+                let (mut cmonth, mut ccursor) = match &self.assist {
+                    Some(Assist::Cal { month, cursor, .. }) => (*month, *cursor),
+                    _ => (today.with_day(1).unwrap_or(today), today),
+                };
+                if let Some(sel) = selected {
+                    cmonth = sel.with_day(1).unwrap_or(sel);
+                    ccursor = sel;
+                } else if year.is_some() || month.is_some() {
+                    let y = year.unwrap_or(cmonth.year());
+                    let m = month.unwrap_or(cmonth.month());
+                    if let Some(d) = NaiveDate::from_ymd_opt(y, m, 1) {
+                        cmonth = d;
+                        ccursor = d;
+                    }
+                }
+                self.assist = Some(Assist::Cal { start, end, month: cmonth, cursor: ccursor, selected });
+                return;
+            }
+        }
+        self.assist = None;
+    }
+
+    fn words_matching<F>(&self, prefix: &str, pick: F, include_done: bool, marker: char, tok: Tok) -> Vec<Item>
+    where
+        F: Fn(&todotxt::Task) -> Vec<String>,
+    {
+        let prefix = prefix.to_lowercase();
+        list::counts(&self.store.lines, include_done, pick)
+            .into_iter()
+            .filter(|(n, _)| n.to_lowercase().starts_with(&prefix))
+            .map(|(n, c)| Item { value: format!("{marker}{n}"), tok, count: c })
+            .collect()
+    }
+
+    /// (selected date, year, month) when the calendar should show for this word.
+    fn date_hit(&self, start: usize, word: &str) -> Option<(Option<NaiveDate>, Option<i32>, Option<u32>)> {
+        let today = self.today();
+        if word == "due" || word.starts_with("due:") {
+            let expr = &word[3.min(word.len())..].trim_start_matches(':');
+            if let Some(d) = todotxt::parse_date_expr(expr, today, false) {
+                return Some((Some(d), None, None));
+            }
+            // partially typed ISO date: 2026 / 2026-1 / 2026-12-
+            let mut year = None;
+            let mut month = None;
+            let mut parts = expr.split('-');
+            if let Some(y) = parts.next() {
+                if y.len() == 4 {
+                    year = y.parse().ok().filter(|y| *y >= 1000);
+                }
+            }
+            if let Some(m) = parts.next() {
+                month = m.parse::<u32>().ok().filter(|m| (1..=12).contains(m));
+            }
+            return Some((None, year, month));
+        }
+        // bare dates, but not the leading "x" / priority / creation-date prefix
+        let text = &self.input.text;
+        let mut prefix_len = 0;
+        let mut rest = text.as_str();
+        if let Some(r) = rest.strip_prefix("x ") {
+            prefix_len += 2;
+            rest = r;
+        } else if rest.len() >= 4 && rest.starts_with('(') && rest.as_bytes()[2] == b')' && rest.as_bytes()[3] == b' ' {
+            prefix_len += 4;
+            rest = &rest[4..];
+        }
+        for _ in 0..2 {
+            let w: String = rest.chars().take(11).collect();
+            if w.chars().count() == 11 && w.ends_with(' ') && todotxt::parse_date_expr(w.trim_end(), today, true).is_some()
+                && w.trim_end().len() == 10
+            {
+                prefix_len += 11;
+                rest = &rest[11..];
+            }
+        }
+        if start >= prefix_len {
+            if let Some(d) = todotxt::parse_date_expr(word, today, true) {
+                return Some((Some(d), None, None));
+            }
+        }
+        None
+    }
+
+    fn accept_assist(&mut self) -> bool {
+        match self.assist.take() {
+            Some(Assist::List { start, end, items, idx, .. }) => {
+                self.input.replace_range(start, end, &items[idx].value);
+                self.on_input_changed();
+                true
+            }
+            Some(Assist::Cal { start, end, cursor, .. }) => {
+                self.input.replace_range(start, end, &format!("due:{}", todotxt::iso(cursor)));
+                self.on_input_changed();
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn cal_move(&mut self, days: i64, months: i32) -> bool {
+        if let Some(Assist::Cal { month, cursor, selected, .. }) = &mut self.assist {
+            let mut c = *cursor;
+            if months != 0 {
+                let total = c.year() * 12 + c.month0() as i32 + months;
+                c = NaiveDate::from_ymd_opt(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, 1).unwrap_or(c);
+            } else if let Some(n) = c.checked_add_signed(Days::days(days)) {
+                c = n;
+            }
+            *cursor = c;
+            *month = c.with_day(1).unwrap_or(c);
+            *selected = None;
+            return true;
+        }
+        false
+    }
+
+    // ---------------------------------------------------------------- keys
+
+    fn on_key(&mut self, k: KeyEvent) {
+        self.msg = None;
+        if self.help {
+            self.help = false;
+            return;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL) && !k.modifiers.contains(KeyModifiers::ALT);
+        match k.code {
+            KeyCode::Char('q') | KeyCode::Char('c') if ctrl => {
+                self.quit = true;
+                return;
+            }
+            KeyCode::F(1) => {
+                self.help = true;
+                return;
+            }
+            KeyCode::F(2) => {
+                self.sort = self.sort.next();
+                self.reload_view();
+                self.save_view();
+                self.msg = Some(format!("Sort: {}", self.sort.name()));
+                return;
+            }
+            KeyCode::F(3) => {
+                self.show_done = !self.show_done;
+                self.reload_view();
+                self.save_view();
+                return;
+            }
+            KeyCode::F(4) => {
+                self.show_sidebar = !self.show_sidebar;
+                if !self.show_sidebar && self.focus == Focus::Sidebar {
+                    self.focus = Focus::List;
+                }
+                self.save_view();
+                return;
+            }
+            KeyCode::F(5) => {
+                self.archive_done();
+                return;
+            }
+            KeyCode::F(6) => {
+                self.calendar = !self.calendar;
+                self.refresh_assist();
+                self.save_view();
+                self.msg = Some(format!("Calendar when typing dates: {}", if self.calendar { "on" } else { "off" }));
+                return;
+            }
+            KeyCode::F(11) => {
+                self.show_status = !self.show_status;
+                self.save_view();
+                return;
+            }
+            KeyCode::F(7) => {
+                self.edit_note();
+                return;
+            }
+            KeyCode::F(9) => {
+                self.git_sync();
+                return;
+            }
+            KeyCode::F(10) => {
+                self.git_menu = if self.git_menu.is_some() { None } else { Some(0) };
+                return;
+            }
+            KeyCode::F(8) => {
+                if self.picker.is_some() {
+                    self.picker = None;
+                } else {
+                    self.open_picker();
+                }
+                return;
+            }
+            _ => {}
+        }
+        if self.git_menu.is_some() {
+            self.git_menu_key(k);
+            return;
+        }
+        if self.picker.is_some() {
+            self.picker_key(k);
+            return;
+        }
+        match self.focus {
+            Focus::List => self.list_key(k),
+            Focus::Sidebar => self.side_key(k),
+            Focus::Input => self.input_key(k),
+        }
+    }
+
+    fn list_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = k.modifiers.contains(KeyModifiers::ALT);
+        match k.code {
+            KeyCode::Up if alt => self.shift_priority(true),
+            KeyCode::Down if alt => self.shift_priority(false),
+            KeyCode::Up => self.move_sel(-1),
+            KeyCode::Down => self.move_sel(1),
+            KeyCode::PageUp => self.move_sel(-10),
+            KeyCode::PageDown => self.move_sel(10),
+            KeyCode::Home => self.select_pos(0),
+            KeyCode::End => self.select_pos(self.view.len().saturating_sub(1)),
+            KeyCode::Char(' ') if !ctrl && !alt => self.toggle_done(),
+            KeyCode::Enter => self.start_edit(),
+            KeyCode::Delete => self.delete_selected(),
+            KeyCode::Tab if self.show_sidebar => self.focus = Focus::Sidebar,
+            KeyCode::Tab => self.focus = Focus::Input,
+            KeyCode::Esc => {
+                if self.filter.is_active() {
+                    self.filter.clear();
+                    self.reload_view();
+                } else {
+                    self.quit = true;
+                }
+            }
+            KeyCode::Char('z') if ctrl && !alt => self.undo_list(),
+            KeyCode::Char('/') if !ctrl => self.enter_search(),
+            // any other printable key starts typing in the bar (like the web app)
+            KeyCode::Char(_) if (!ctrl && !alt) || (ctrl && alt) => {
+                self.focus = Focus::Input;
+                self.input_key(k);
+            }
+            _ => {}
+        }
+    }
+
+    fn side_key(&mut self, k: KeyEvent) {
+        let entries = self.side_entries();
+        let n = entries.len();
+        match k.code {
+            KeyCode::Up => self.side_idx = self.side_idx.saturating_sub(1),
+            KeyCode::Down => self.side_idx = (self.side_idx + 1).min(n.saturating_sub(1)),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if let Some((e, _)) = entries.get(self.side_idx) {
+                    let e = e.clone();
+                    self.toggle_side(&e);
+                }
+            }
+            KeyCode::Tab | KeyCode::Esc | KeyCode::Right => self.focus = Focus::List,
+            KeyCode::Char(_) => {
+                self.focus = Focus::Input;
+                self.input_key(k);
+            }
+            _ => {}
+        }
+    }
+
+    fn input_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL) && !k.modifiers.contains(KeyModifiers::ALT);
+        let alt = k.modifiers.contains(KeyModifiers::ALT) && !k.modifiers.contains(KeyModifiers::CONTROL);
+        let in_cal = matches!(self.assist, Some(Assist::Cal { .. }));
+
+        // calendar navigation
+        if in_cal {
+            match k.code {
+                KeyCode::Left if alt => { self.cal_move(-1, 0); return; }
+                KeyCode::Right if alt => { self.cal_move(1, 0); return; }
+                KeyCode::Up if alt => { self.cal_move(-7, 0); return; }
+                KeyCode::Down if alt => { self.cal_move(7, 0); return; }
+                KeyCode::PageUp => { self.cal_move(0, -1); return; }
+                KeyCode::PageDown => { self.cal_move(0, 1); return; }
+                _ => {}
+            }
+        }
+
+        match k.code {
+            KeyCode::Esc => {
+                if self.assist.is_some() {
+                    let (start, _, word) = self.input.word_at_cursor();
+                    self.dismissed = Some((start, word));
+                    self.assist = None;
+                } else {
+                    match self.mode {
+                        Mode::Edit(_) => self.finish_edit(false),
+                        Mode::Search => self.leave_search(),
+                        Mode::Add => self.focus_list(),
+                    }
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ')
+                if !ctrl && !alt && matches!(self.assist, Some(Assist::List { exact: false, .. })) =>
+            {
+                // Enter / Space take the highlighted suggestion (like Tab); a word that already
+                // exists exactly is left alone
+                self.accept_assist();
+            }
+            KeyCode::Enter => match self.mode {
+                Mode::Add => self.submit_add(),
+                Mode::Search => self.focus_list(),
+                Mode::Edit(_) => self.finish_edit(true),
+            },
+            KeyCode::Tab => {
+                if !self.accept_assist() {
+                    self.focus_list();
+                }
+            }
+            KeyCode::Up | KeyCode::Down if self.assist.is_some() && !in_cal => {
+                if let Some(Assist::List { idx, items, .. }) = &mut self.assist {
+                    let n = items.len();
+                    *idx = if k.code == KeyCode::Down { (*idx + 1) % n } else { (*idx + n - 1) % n };
+                }
+            }
+            KeyCode::Up | KeyCode::Down if !alt => {
+                if self.mode == Mode::Search {
+                    self.leave_search();
+                }
+                self.assist = None;
+                self.focus = Focus::List;
+                self.move_sel(if k.code == KeyCode::Up { -1 } else { 1 });
+            }
+            KeyCode::Char('/') if !ctrl && !alt && self.mode == Mode::Add && self.input.is_empty() => self.enter_search(),
+            _ => {
+                let today = self.today();
+                match self.input.handle_key(k, today) {
+                    Edited::No => {}
+                    Edited::Moved => self.refresh_assist(),
+                    Edited::Yes => self.on_input_changed(),
+                    Edited::Word(_) => {
+                        self.dismissed = None; // let the tag / context menu open right away
+                        self.on_input_changed();
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- drawing
+
+    fn draw(&mut self, f: &mut Frame) {
+        let area = f.area();
+        let rows = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(3),
+            Constraint::Length(if self.show_status { 1 } else { 0 }),
+        ])
+        .split(area);
+        self.draw_header(f, rows[0]);
+
+        let list_area = if self.show_sidebar && rows[1].width > 50 {
+            let cols = Layout::horizontal([Constraint::Length(26), Constraint::Min(20)]).split(rows[1]);
+            self.draw_sidebar(f, cols[0]);
+            cols[1]
+        } else {
+            rows[1]
+        };
+        self.draw_tasks(f, list_area);
+        self.draw_input(f, rows[2]);
+        if self.show_status {
+            self.draw_status(f, rows[3]);
+        }
+        self.draw_assist(f, list_area, rows[2]);
+        if self.picker.is_some() {
+            self.draw_picker(f, area);
+        }
+        if self.git_menu.is_some() {
+            self.draw_git_menu(f, area);
+        }
+        if self.help {
+            self.draw_help(f, area);
+        }
+    }
+
+    fn draw_git_menu(&self, f: &mut Frame, area: Rect) {
+        let Some(sel) = self.git_menu else { return };
+        let mut lines: Vec<Line> = Vec::new();
+        match &self.folder {
+            None => lines.push(Line::from("Git works on a todo folder (F8, then S to use a folder).")),
+            Some(d) => {
+                let cfg = git::GitCfg::load(d);
+                let repo = d.join(".git").exists();
+                for (i, (key, label)) in GIT_ROWS.iter().enumerate() {
+                    let text = match (*key, &cfg) {
+                        ("sync", _) | ("init", _) => format!("    {label}"),
+                        (k, Some(c)) => format!("[{}] {label}", if c.get(k).unwrap_or(false) { "x" } else { " " }),
+                        (_, None) => format!("[ ] {label}"),
+                    };
+                    let dim = (*key == "init" && cfg.is_some() && repo) || (!["sync", "init"].contains(key) && cfg.is_none());
+                    let mut st = if dim { Style::default().fg(Color::DarkGray) } else { Style::default() };
+                    if i == sel {
+                        st = st.bg(Color::Indexed(238));
+                    }
+                    lines.push(Line::from(Span::styled(text, st)));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("{} - {}", d.display(), if repo { "git repository" } else { "no git repository" }),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+        let w = 62.min(area.width.saturating_sub(2));
+        let h = (lines.len() as u16 + 2).min(area.height);
+        let rect = Rect::new(area.x + area.width.saturating_sub(w) / 2, area.y + area.height.saturating_sub(h) / 2, w, h);
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightBlue))
+            .title(" Git (.todo-git.cfg) ")
+            .title_bottom(" Up/Down - Enter toggle / run - Esc close ");
+        f.render_widget(Paragraph::new(lines).block(block), rect);
+    }
+
+    fn git_menu_key(&mut self, k: KeyEvent) {
+        let Some(sel) = self.git_menu else { return };
+        match k.code {
+            KeyCode::Esc => self.git_menu = None,
+            KeyCode::Up => self.git_menu = Some(sel.saturating_sub(1)),
+            KeyCode::Down => self.git_menu = Some((sel + 1).min(GIT_ROWS.len() - 1)),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let Some(dir) = self.folder.clone() else {
+                    self.msg = Some("git needs folder mode (F8, then S)".into());
+                    return;
+                };
+                let key = GIT_ROWS[sel].0;
+                match key {
+                    "sync" => {
+                        self.git_menu = None;
+                        self.git_sync();
+                    }
+                    "init" => {
+                        self.msg = Some(match git::init(&dir) {
+                            Ok(m) => format!("git: {m}"),
+                            Err(e) => format!("git: {e}"),
+                        });
+                    }
+                    _ => match git::GitCfg::load(&dir) {
+                        None => self.msg = Some("no .todo-git.cfg: initialize git first (last row)".into()),
+                        Some(mut c) => {
+                            let on = !c.get(key).unwrap_or(false);
+                            let r = c.set(key, on).and_then(|_| c.save(&dir).map_err(|e| e.to_string()));
+                            if let Err(e) = r {
+                                self.msg = Some(format!("git: {e}"));
+                            }
+                        }
+                    },
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_header(&self, f: &mut Frame, area: Rect) {
+        let name = self.path.file_name().map_or_else(|| "todo.txt".into(), |n| n.to_string_lossy().into_owned());
+        let line = Line::from(vec![
+            Span::styled(format!(" {name} "), Style::default().add_modifier(Modifier::BOLD).fg(Color::Black).bg(Color::LightBlue)),
+            Span::styled(
+                format!("  sort: {}{}  ", self.sort.name(), if self.show_done { "" } else { "  (completed hidden)" }),
+                dim(),
+            ),
+            Span::styled(self.path.display().to_string(), dim()),
+            Span::styled(if self.folder.is_some() { "   [folder mode - F8 switches files]" } else { "" }, dim()),
+        ]);
+        // version and commit hash, top right
+        let version = format!(" v{} ({}) ", env!("TODO_VERSION"), env!("TODO_HASH"));
+        let cols = Layout::horizontal([Constraint::Min(0), Constraint::Length(version.width() as u16)]).split(area);
+        f.render_widget(Paragraph::new(line), cols[0]);
+        f.render_widget(Paragraph::new(Span::styled(version, dim())), cols[1]);
+    }
+
+    fn draw_sidebar(&self, f: &mut Frame, area: Rect) {
+        let entries = self.side_entries();
+        let border = if self.focus == Focus::Sidebar { Color::LightBlue } else { Color::DarkGray };
+        let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(border)).title(" Filters ");
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let mut lines: Vec<Line> = Vec::new();
+        let mut section = "";
+        for (i, (e, count)) in entries.iter().enumerate() {
+            let (title, label, active, tok) = match e {
+                Side::Project(p) => ("Projects", format!("+{p}"), self.filter.project.as_deref() == Some(p), Tok::Project),
+                Side::Context(c) => ("Contexts", format!("@{c}"), self.filter.context.as_deref() == Some(c), Tok::Context),
+                Side::Priority(p) => ("Priority", format!("({p})"), self.filter.priority == Some(*p), Tok::Priority(*p)),
+            };
+            if title != section {
+                section = title;
+                let x = if (title == "Projects" && self.filter.project.is_some())
+                    || (title == "Contexts" && self.filter.context.is_some())
+                    || (title == "Priority" && self.filter.priority.is_some())
+                {
+                    " x"
+                } else {
+                    ""
+                };
+                lines.push(Line::from(Span::styled(format!("{title}{x}"), dim().add_modifier(Modifier::BOLD))));
+            }
+            let mut st = tok_style(tok);
+            if active {
+                st = st.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            }
+            if self.focus == Focus::Sidebar && i == self.side_idx {
+                st = st.add_modifier(Modifier::REVERSED);
+            }
+            let width = inner.width as usize;
+            let text = format!("{}{}", if active { "✓ " } else { "  " }, label);
+            let count = count.to_string();
+            let pad = width.saturating_sub(text.width() + count.width());
+            lines.push(Line::from(vec![Span::styled(text, st), Span::raw(" ".repeat(pad)), Span::styled(count, dim())]));
+        }
+        if entries.is_empty() {
+            lines.push(Line::from(Span::styled("no projects, contexts", dim())));
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+
+    fn draw_tasks(&mut self, f: &mut Frame, area: Rect) {
+        let today = todotxt::iso(self.today());
+        let items: Vec<ListItem> = self.view.iter().map(|&i| self.task_item(i, &today)).collect();
+        let border = if self.focus == Focus::List { Color::LightBlue } else { Color::DarkGray };
+        let title = format!(" Tasks ({}) ", self.view.len());
+        let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(border)).title(title);
+        if items.is_empty() {
+            let text = if self.store.lines.iter().all(|l| l.trim().is_empty()) {
+                "No tasks yet. Type below and press Enter to add one."
+            } else {
+                "No tasks match."
+            };
+            f.render_widget(Paragraph::new(Span::styled(text, dim())).block(block), area);
+            return;
+        }
+        let list = List::new(items).block(block).highlight_style(Style::default().bg(Color::Indexed(238)));
+        f.render_stateful_widget(list, area, &mut self.list_state);
+    }
+
+    fn task_item(&self, line: usize, today: &str) -> ListItem<'static> {
+        let t = todotxt::parse(&self.store.lines[line]);
+        // soon = yellow, today = orange, overdue = red: on the due: word and the line number
+        let due_style = |st: DueStatus| match st {
+            DueStatus::Overdue => Some(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            DueStatus::Today => Some(Style::default().fg(Color::Indexed(208)).add_modifier(Modifier::BOLD)),
+            DueStatus::Soon => Some(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            DueStatus::Upcoming => None,
+        };
+        let row_due = todotxt::due_status(&t, today).filter(|_| !t.done).and_then(due_style);
+        let mut spans = vec![
+            Span::styled(format!("{:>3} ", line + 1), row_due.unwrap_or_else(dim)),
+            Span::raw(if t.done { "[x] " } else { "[ ] " }),
+        ];
+        match t.priority {
+            Some(p) if !t.done => spans.push(Span::styled(format!("({p}) "), tok_style(Tok::Priority(p)))),
+            Some(p) => spans.push(Span::styled(format!("({p}) "), dim())),
+            None => spans.push(Span::raw("    ")),
+        }
+        for (piece, tok) in highlight(&t.text, false) {
+            let style = if t.done {
+                dim().add_modifier(Modifier::CROSSED_OUT)
+            } else if tok == Tok::Due {
+                let mut tt = todotxt::Task::default();
+                if let Some(d) = piece.strip_prefix("due:") {
+                    tt.tags.insert("due".into(), d.to_string());
+                }
+                match todotxt::due_status(&tt, today).and_then(due_style) {
+                    Some(st) => st,
+                    None => Style::default().fg(Color::Gray),
+                }
+            } else {
+                tok_style(tok)
+            };
+            spans.push(Span::styled(piece, style));
+        }
+        ListItem::new(Line::from(spans))
+    }
+
+    fn draw_input(&self, f: &mut Frame, area: Rect) {
+        let (title, color) = match self.mode {
+            Mode::Add => (" Add task ".to_string(), Color::LightBlue),
+            Mode::Search => (" Search  (Esc: back to adding) ".to_string(), Color::Yellow),
+            Mode::Edit(i) => (format!(" Edit line {}  (Enter: save, Esc: cancel) ", i + 1), Color::Green),
+        };
+        let focused = self.focus == Focus::Input;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if focused { color } else { Color::DarkGray }))
+            .title(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let line = if self.input.is_empty() {
+            let hint = match self.mode {
+                Mode::Add => "(A) Call Mom +Family @phone due:tomorrow      type to add, / to search",
+                Mode::Search => "type to filter the list",
+                Mode::Edit(_) => "",
+            };
+            Line::from(Span::styled(hint, dim()))
+        } else {
+            Line::from(highlight(&self.input.text, true).into_iter().map(|(s, t)| Span::styled(s, tok_style(t))).collect::<Vec<_>>())
+        };
+        let col = self.input.text.chars().take(self.input.cursor).collect::<String>().width() as u16;
+        let offset = col.saturating_sub(inner.width.saturating_sub(1));
+        f.render_widget(Paragraph::new(line).scroll((0, offset)), inner);
+        if focused && !self.help {
+            f.set_cursor_position(Position::new(inner.x + col - offset, inner.y));
+        }
+    }
+
+    fn draw_status(&self, f: &mut Frame, area: Rect) {
+        let open = self.store.lines.iter().filter(|l| !l.trim().is_empty() && !todotxt::parse(l).done).count();
+        let total = self.store.lines.iter().filter(|l| !l.trim().is_empty()).count();
+        let mut right = format!(" {open} open · {total} total · showing {} ", self.view.len());
+        if self.filter.is_active() {
+            let mut parts: Vec<String> = Vec::new();
+            if !self.filter.q.trim().is_empty() {
+                parts.push(format!("\"{}\"", self.filter.q.trim()));
+            }
+            if let Some(p) = &self.filter.project {
+                parts.push(format!("+{p}"));
+            }
+            if let Some(c) = &self.filter.context {
+                parts.push(format!("@{c}"));
+            }
+            if let Some(p) = self.filter.priority {
+                parts.push(format!("({p})"));
+            }
+            right = format!(" filter: {} (Esc clears) ·{right}", parts.join(" "));
+        }
+        let left = match &self.msg {
+            Some(m) => Span::styled(format!(" {m}"), Style::default().fg(Color::Yellow)),
+            None => Span::styled(
+                match self.focus {
+                    Focus::List => " ↑↓ select · Space done · Enter edit · Del delete · Alt+↑↓ priority · / search · F7 note · F8 files · F1 help",
+                    Focus::Sidebar => " ↑↓ select · Enter filter · Tab back · F1 help",
+                    Focus::Input => " Enter ok · Tab complete/list · Esc back · F1 help",
+                },
+                dim(),
+            ),
+        };
+        let cols = Layout::horizontal([Constraint::Min(0), Constraint::Length(right.width() as u16)]).split(area);
+        let mut spans: Vec<Span> = Vec::new();
+        let mut used = left.width();
+        if let Some(st) = &self.git_status {
+            used += st.label().width() + 8;
+        }
+        if let Some(dir) = &self.folder {
+            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| dir.display().to_string());
+            if used + name.width() + 4 <= cols[0].width as usize {
+                spans.push(Span::styled(format!(" {name} "), dim()));
+                spans.push(Span::styled("│", dim()));
+            }
+        }
+        if let Some(st) = &self.git_status {
+            let style = if st.changed > 0 { Style::default().fg(Color::Yellow) } else { dim() };
+            spans.push(Span::styled(format!(" git: {} ", st.label()), style));
+            spans.push(Span::styled("│", dim()));
+        }
+        spans.push(left);
+        f.render_widget(Paragraph::new(Line::from(spans)), cols[0]);
+        f.render_widget(Paragraph::new(Span::styled(right, dim())), cols[1]);
+    }
+
+    fn draw_assist(&self, f: &mut Frame, list_area: Rect, input_area: Rect) {
+        let Some(assist) = &self.assist else { return };
+        match assist {
+            Assist::List { items, idx, .. } => {
+                let w = items.iter().map(|i| i.value.width() + 6).max().unwrap_or(10).max(16) as u16 + 2;
+                let h = items.len() as u16 + 2;
+                let rect = popup_rect(list_area, input_area, w, h);
+                let lines: Vec<Line> = items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, it)| {
+                        let mut st = tok_style(it.tok);
+                        if i == *idx {
+                            st = st.add_modifier(Modifier::REVERSED);
+                        }
+                        let pad = (rect.width as usize).saturating_sub(2 + it.value.width() + it.count.to_string().len() + 1);
+                        Line::from(vec![
+                            Span::styled(format!(" {}", it.value), st),
+                            Span::styled(" ".repeat(pad), st),
+                            Span::styled(format!("{} ", it.count), if i == *idx { st } else { dim() }),
+                        ])
+                    })
+                    .collect();
+                f.render_widget(Clear, rect);
+                f.render_widget(
+                    Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Tab: insert ")),
+                    rect,
+                );
+            }
+            Assist::Cal { month, cursor, selected, .. } => {
+                let rect = popup_rect(list_area, input_area, 26, 11);
+                let today = self.today();
+                let mut lines: Vec<Line> = vec![
+                    Line::from(Span::styled(
+                        format!("{:^24}", format!("{} {}", MONTHS[month.month0() as usize], month.year())),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(" Mo Tu We Th Fr Sa Su", dim())),
+                ];
+                let offset = month.weekday().num_days_from_monday() as usize;
+                let days_in_month = days_in(month.year(), month.month());
+                let mut cells: Vec<Span> = vec![Span::raw("   "); offset];
+                for d in 1..=days_in_month {
+                    let date = NaiveDate::from_ymd_opt(month.year(), month.month(), d).unwrap_or(*month);
+                    let mut st = Style::default();
+                    if date == today {
+                        st = st.add_modifier(Modifier::UNDERLINED).fg(Color::LightBlue);
+                    }
+                    if Some(date) == *selected {
+                        st = st.fg(Color::Green).add_modifier(Modifier::BOLD);
+                    }
+                    if date == *cursor {
+                        st = st.add_modifier(Modifier::REVERSED);
+                    }
+                    cells.push(Span::styled(format!("{d:>3}"), st));
+                }
+                for week in cells.chunks(7) {
+                    lines.push(Line::from(week.to_vec()));
+                }
+                lines.truncate(8);
+                lines.push(Line::from(Span::styled("Tab insert · Alt+←↑↓→ · PgUp/Dn", dim())));
+                f.render_widget(Clear, rect);
+                f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" due ")), rect);
+            }
+        }
+    }
+
+    fn draw_picker(&mut self, f: &mut Frame, area: Rect) {
+        let current = self.path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let in_dir = self.folder.clone();
+        let Some(pk) = &mut self.picker else { return };
+        let w = 70.min(area.width.saturating_sub(2));
+        let h = (pk.entries.len() as u16 + 4).clamp(8, area.height.saturating_sub(2).max(8)).min(area.height);
+        let rect = Rect::new(
+            area.x + area.width.saturating_sub(w) / 2,
+            area.y + area.height.saturating_sub(h) / 2,
+            w,
+            h,
+        );
+        f.render_widget(Clear, rect);
+        let items: Vec<ListItem> = pk
+            .entries
+            .iter()
+            .map(|e| match e.kind {
+                PKind::Up => ListItem::new(Span::styled("..  (up)", Style::default().fg(Color::LightBlue))),
+                PKind::Dir => ListItem::new(Span::styled(format!("{}/", e.name), Style::default().fg(Color::LightBlue))),
+                PKind::File => {
+                    let cur = pk.dir == self.path.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+                        && current.as_deref() == Some(e.name.as_str());
+                    ListItem::new(Span::styled(
+                        format!("{}{}", if cur { "✓ " } else { "  " }, e.name),
+                        if cur { Style::default().add_modifier(Modifier::BOLD) } else { Style::default() },
+                    ))
+                }
+            })
+            .collect();
+        let mode = if in_dir.as_deref() == Some(pk.dir.as_path()) { " (folder mode)" } else { "" };
+        let title = format!(" {}{} ", pk.dir.display(), mode);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::LightBlue))
+            .title(title)
+            .title_bottom(" Enter open · S use this folder · Backspace up · Esc close ");
+        let list = List::new(items).block(block).highlight_style(Style::default().bg(Color::Indexed(238)));
+        f.render_stateful_widget(list, rect, &mut pk.state);
+    }
+
+    fn draw_help(&self, f: &mut Frame, area: Rect) {
+        let text = [
+            "todo.txt - keys",
+            "",
+            "List:      ↑ ↓ PgUp PgDn Home End   select",
+            "           Space        mark done / open again",
+            "           Enter        edit the selected line in the bar",
+            "           Delete       delete (Ctrl+Z undoes)",
+            "           Alt+↑ / Alt+↓  raise / lower priority",
+            "           Tab          sidebar filters   Esc  clear filter / quit",
+            "           any other key starts typing a new task",
+            "Bar:       Enter add / save   Esc back   /  search (first char)",
+            "           Tab accept suggestion (+tag @context (P) due:date)",
+            "           Alt+arrows / PgUp PgDn move in the calendar, Tab inserts",
+            "           Ctrl+Backspace / Ctrl+Delete  remove the whole word",
+            "           Ctrl+Z / Ctrl+Y  undo / redo while typing",
+            "Dates:     due:tomorrow  due:+3d  due:next week  due:24.12.  due:24.12.2026",
+            "Global:    F2 sort   F3 show/hide done   F4 sidebar   F5 archive done",
+            "           F6 calendar on/off   F7 note of the task   F8 file / folder selector",
+            "           F11 status line on/off",
+            "           F9 git sync now   F10 git settings (support, auto, pull, commit, push, init;",
+            "           stored in .todo-git.cfg of the folder, same as the desktop app)",
+            "           Ctrl+Q quit   every change is saved at once; view settings are remembered",
+            "Files:     F8: Enter opens a file / enters a folder, S uses the shown folder for all",
+            "           its *.txt files, Backspace goes up. note:NAME text lives in NAME.txt",
+            "           (folder mode: next to the lists, else ~/.todo.txt/notes/)",
+            "",
+            "press any key",
+        ];
+        let w = 78.min(area.width.saturating_sub(2));
+        let h = (text.len() as u16 + 2).min(area.height);
+        let rect = Rect::new(area.x + (area.width.saturating_sub(w)) / 2, area.y + (area.height.saturating_sub(h)) / 2, w, h);
+        f.render_widget(Clear, rect);
+        let lines: Vec<Line> = text.iter().map(|l| Line::from(*l)).collect();
+        f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Help ")), rect);
+    }
+}
+
+fn days_in(year: i32, month: u32) -> u32 {
+    let (ny, nm) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    NaiveDate::from_ymd_opt(ny, nm, 1)
+        .and_then(|d| d.pred_opt())
+        .map_or(30, |d| d.day())
+}
+
+/// A popup above the input bar, aligned with the task list.
+fn popup_rect(list_area: Rect, input_area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(list_area.width);
+    let h = h.min(input_area.y.saturating_sub(list_area.y).max(3));
+    let y = input_area.y.saturating_sub(h);
+    Rect::new(list_area.x + 1, y, w, h)
+}

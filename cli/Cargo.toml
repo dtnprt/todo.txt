@@ -1,0 +1,22 @@
+[package]
+name = "todo-cli"
+version = "0.1.0"
+edition = "2021"
+description = "todo.txt command line tool with an interactive terminal UI"
+
+[[bin]]
+name = "todo"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+unicode-width = "0.2"
+git2 = "0.21"
+auth-git2 = "0.6"
+
+[profile.release]
+lto = true
+strip = true

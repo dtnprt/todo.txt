@@ -1,0 +1,23 @@
+/* Rosé Pine - a complete theme in one file (system fonts). */
+:root {
+  --bg: #191724;
+  --panel: #1f1d2e;
+  --hover: #26233a;
+  --line: #403d52;
+  --text: #e0def4;
+  --muted: #908caa;
+  --accent: #c4a7e7;
+  --accent-text: #191724;
+  --danger: #eb6f92;
+  --warn: #ebbcba;
+  --ok: #9ccfd8;
+  --pA: #eb6f92;
+  --pB: #ebbcba;
+  --pC: #f6c177;
+  --pD: #9ccfd8;
+  --pX: #6e6a86;
+  --due-soon: #f6c177;
+  --due-today: #ebbcba;
+  --due-over: #eb6f92;
+  color-scheme: dark;
+}

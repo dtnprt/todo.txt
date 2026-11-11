@@ -1,0 +1,23 @@
+/* Iceberg - a complete theme in one file (system fonts). */
+:root {
+  --bg: #161821;
+  --panel: #1e2132;
+  --hover: #2a3158;
+  --line: #3e445e;
+  --text: #c6c8d1;
+  --muted: #8389a3;
+  --accent: #84a0c6;
+  --accent-text: #161821;
+  --danger: #e27878;
+  --warn: #e2a478;
+  --ok: #b4be82;
+  --pA: #e27878;
+  --pB: #e2a478;
+  --pC: #e9b189;
+  --pD: #b4be82;
+  --pX: #6b7089;
+  --due-soon: #e9b189;
+  --due-today: #e2a478;
+  --due-over: #e27878;
+  color-scheme: dark;
+}

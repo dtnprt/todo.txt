@@ -1,0 +1,23 @@
+/* Catppuccin Macchiato - a complete theme in one file (system fonts). */
+:root {
+  --bg: #24273a;
+  --panel: #1e2030;
+  --hover: #363a4f;
+  --line: #494d64;
+  --text: #cad3f5;
+  --muted: #a5adcb;
+  --accent: #c6a0f6;
+  --accent-text: #181926;
+  --danger: #ed8796;
+  --warn: #f5a97f;
+  --ok: #a6da95;
+  --pA: #ed8796;
+  --pB: #f5a97f;
+  --pC: #eed49f;
+  --pD: #a6da95;
+  --pX: #6e738d;
+  --due-soon: #eed49f;
+  --due-today: #f5a97f;
+  --due-over: #ed8796;
+  color-scheme: dark;
+}

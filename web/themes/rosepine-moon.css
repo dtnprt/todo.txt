@@ -1,0 +1,23 @@
+/* Rosé Pine Moon - a complete theme in one file (system fonts). */
+:root {
+  --bg: #232136;
+  --panel: #2a273f;
+  --hover: #393552;
+  --line: #44415a;
+  --text: #e0def4;
+  --muted: #908caa;
+  --accent: #c4a7e7;
+  --accent-text: #232136;
+  --danger: #eb6f92;
+  --warn: #ea9a97;
+  --ok: #9ccfd8;
+  --pA: #eb6f92;
+  --pB: #ea9a97;
+  --pC: #f6c177;
+  --pD: #9ccfd8;
+  --pX: #6e6a86;
+  --due-soon: #f6c177;
+  --due-today: #ea9a97;
+  --due-over: #eb6f92;
+  color-scheme: dark;
+}

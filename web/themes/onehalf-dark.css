@@ -1,0 +1,23 @@
+/* One Half Dark - a complete theme in one file (system fonts). */
+:root {
+  --bg: #282c34;
+  --panel: #21252b;
+  --hover: #313640;
+  --line: #474e5d;
+  --text: #dcdfe4;
+  --muted: #a0a7b4;
+  --accent: #61afef;
+  --accent-text: #282c34;
+  --danger: #e06c75;
+  --warn: #d19a66;
+  --ok: #98c379;
+  --pA: #e06c75;
+  --pB: #d19a66;
+  --pC: #e5c07b;
+  --pD: #98c379;
+  --pX: #5d677a;
+  --due-soon: #e5c07b;
+  --due-today: #d19a66;
+  --due-over: #e06c75;
+  color-scheme: dark;
+}

@@ -1,0 +1,23 @@
+/* Iceberg Light - a complete theme in one file (system fonts). */
+:root {
+  --bg: #e8e9ec;
+  --panel: #dcdfe7;
+  --hover: #cad0de;
+  --line: #b6bccd;
+  --text: #33374c;
+  --muted: #6b7089;
+  --accent: #2d539e;
+  --accent-text: #e8e9ec;
+  --danger: #cc517a;
+  --warn: #c57339;
+  --ok: #668e3d;
+  --pA: #cc517a;
+  --pB: #c57339;
+  --pC: #c57339;
+  --pD: #668e3d;
+  --pX: #8389a3;
+  --due-soon: #c57339;
+  --due-today: #c57339;
+  --due-over: #cc517a;
+  color-scheme: light;
+}

@@ -1,0 +1,23 @@
+/* Rosé Pine Dawn - a complete theme in one file (system fonts). */
+:root {
+  --bg: #faf4ed;
+  --panel: #fffaf3;
+  --hover: #f2e9e1;
+  --line: #dfdad9;
+  --text: #575279;
+  --muted: #797593;
+  --accent: #907aa9;
+  --accent-text: #fffaf3;
+  --danger: #b4637a;
+  --warn: #d7827e;
+  --ok: #56949f;
+  --pA: #b4637a;
+  --pB: #d7827e;
+  --pC: #c07a1e;
+  --pD: #56949f;
+  --pX: #9893a5;
+  --due-soon: #c07a1e;
+  --due-today: #d7827e;
+  --due-over: #b4637a;
+  color-scheme: light;
+}

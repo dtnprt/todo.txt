@@ -1,0 +1,23 @@
+/* Catppuccin Mocha - a complete theme in one file (system fonts). */
+:root {
+  --bg: #1e1e2e;
+  --panel: #181825;
+  --hover: #313244;
+  --line: #45475a;
+  --text: #cdd6f4;
+  --muted: #a6adc8;
+  --accent: #cba6f7;
+  --accent-text: #11111b;
+  --danger: #f38ba8;
+  --warn: #fab387;
+  --ok: #a6e3a1;
+  --pA: #f38ba8;
+  --pB: #fab387;
+  --pC: #f9e2af;
+  --pD: #a6e3a1;
+  --pX: #6c7086;
+  --due-soon: #f9e2af;
+  --due-today: #fab387;
+  --due-over: #f38ba8;
+  color-scheme: dark;
+}

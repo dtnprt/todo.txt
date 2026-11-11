@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>todo.txt</title>
+  <link rel="stylesheet" href="vendor/fa/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232563eb'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar">
+    <div class="dd" id="fileDd">
+      <button class="dd-btn file-btn" aria-haspopup="true" aria-expanded="false" title="Switch file (F8)"><h1 id="fileName">todo.txt</h1> <i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
+      <div class="dd-menu" id="fileList" role="menu" hidden></div>
+    </div>
+    <span id="dirty" class="dirty" hidden title="Unsaved changes">●</span>
+    <div class="dd">
+      <button class="dd-btn" aria-haspopup="true" aria-expanded="false" title="File" aria-label="File"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> <i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
+      <div class="dd-menu" role="menu" hidden>
+        <button id="new" role="menuitem"><i class="fa-solid fa-file" aria-hidden="true"></i> New</button>
+        <button id="open" role="menuitem"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Open…</button>
+        <button id="openFolder" role="menuitem"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i> Open folder…</button>
+        <button id="refresh" role="menuitem"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Reload from disk <kbd>Ctrl+R</kbd></button>
+        <button id="save" role="menuitem"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save <kbd>Ctrl+S</kbd></button>
+        <button id="saveAs" role="menuitem"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Save as…</button>
+        <button id="archive" role="menuitem"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Archive done tasks <kbd>F5</kbd></button>
+      </div>
+    </div>
+    <div class="dd" id="gitDd" hidden>
+      <button class="dd-btn" aria-haspopup="true" aria-expanded="false" title="Git" aria-label="Git"><i class="fa-solid fa-code-branch" aria-hidden="true"></i> <i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
+      <div class="dd-menu" role="menu" hidden>
+        <button id="gitEnabled" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Git support</button>
+        <button id="gitAuto" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Git auto (pull on start, commit + push changes)</button>
+        <button id="gitPull" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> &nbsp;&nbsp;Auto pull</button>
+        <button id="gitCommit" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> &nbsp;&nbsp;Auto commit</button>
+        <button id="gitPush" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> &nbsp;&nbsp;Auto push</button>
+        <button id="gitSync" role="menuitem"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Git sync now</button>
+      </div>
+    </div>
+    <div class="dd">
+      <button class="dd-btn" aria-haspopup="true" aria-expanded="false" title="View / Sort (F2: next order)" aria-label="View and sort"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i> <i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
+      <div class="dd-menu" role="menu" hidden>
+        <button role="menuitemradio" data-sort="priority" aria-checked="false"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Priority <kbd>F2</kbd></button>
+        <button role="menuitemradio" data-sort="due" aria-checked="false"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Due date</button>
+        <button role="menuitemradio" data-sort="created" aria-checked="false"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Created</button>
+        <button role="menuitemradio" data-sort="alpha" aria-checked="false"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> A–Z</button>
+        <button role="menuitemradio" data-sort="file" aria-checked="false"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> File order</button>
+        <hr>
+        <button id="viewToggle" role="menuitem"></button>
+      </div>
+    </div>
+    <button id="optBtn" class="icon" title="Settings" aria-label="Settings"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
+    <div class="spacer"></div>
+    <button id="undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
+    <span id="winCtl" class="win-ctl" hidden>
+      <button class="icon" id="winMin" title="Minimize" aria-label="Minimize"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+      <button class="icon" id="winClose" title="Close" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </span>
+    <input type="file" id="fileInput" accept=".txt,text/plain" hidden>
+  </header>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar" aria-label="Filters"></aside>
+
+    <main>
+      <ul id="list" class="tasks"></ul>
+      <textarea id="raw" class="raw" spellcheck="false" hidden aria-label="Raw todo.txt"></textarea>
+
+      <form id="addForm" class="composer" autocomplete="off">
+        <div class="composer-box">
+          <button type="button" id="modeBtn" class="mode" aria-label="Switch between add and search mode"></button>
+          <div class="field">
+            <div id="hl" class="hl" aria-hidden="true"></div>
+            <input id="addInput" type="text" spellcheck="false" autocomplete="off">
+          </div>
+          <div id="ac" class="ac" hidden></div>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div id="settings" class="help settings" hidden>
+    <div class="help-box set-box" role="dialog" aria-label="Settings">
+      <div class="set-head"><h2>Settings</h2><button type="button" id="setClose" class="icon" title="Close (Esc)" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div class="set-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
+        <button type="button" role="tab" data-tab="window" aria-selected="false">Window</button>
+        <button type="button" role="tab" data-tab="theme" aria-selected="false">Theme</button>
+      </div>
+      <div class="set-pane" data-pane="general">
+        <button id="autoSaveToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Auto save</button>
+        <button id="showDone" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show completed <kbd>F3</kbd></button>
+        <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show sidebar <kbd>F4</kbd></button>
+        <button id="calToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show Calendar <kbd>F6</kbd></button>
+        <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show status bar</button>
+        <button id="lineNoToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Line numbers</button>
+        <button id="gitInit" class="git-item" role="menuitem" style="display:none"><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Initialize git here…</button>
+      </div>
+      <div class="set-pane" data-pane="window" hidden>
+        <button id="framelessToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Hide window frame <kbd>F12</kbd></button>
+        <button id="onTopToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Always on top <kbd>F9</kbd></button>
+        <button id="minimalToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Minimal mode <kbd>F11</kbd></button>
+      </div>
+      <div class="set-pane" data-pane="theme" hidden>
+        <div id="themeMenu" role="menu"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="drop" class="drop" hidden>Drop a .txt file to open it</div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

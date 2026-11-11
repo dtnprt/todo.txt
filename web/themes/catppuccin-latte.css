@@ -1,0 +1,23 @@
+/* Catppuccin Latte - a complete theme in one file (system fonts). */
+:root {
+  --bg: #eff1f5;
+  --panel: #e6e9ef;
+  --hover: #ccd0da;
+  --line: #bcc0cc;
+  --text: #4c4f69;
+  --muted: #6c6f85;
+  --accent: #8839ef;
+  --accent-text: #eff1f5;
+  --danger: #d20f39;
+  --warn: #fe640b;
+  --ok: #40a02b;
+  --pA: #d20f39;
+  --pB: #fe640b;
+  --pC: #df8e1d;
+  --pD: #40a02b;
+  --pX: #9ca0b0;
+  --due-soon: #df8e1d;
+  --due-today: #fe640b;
+  --due-over: #d20f39;
+  color-scheme: light;
+}

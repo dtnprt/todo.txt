@@ -1,0 +1,23 @@
+/* Oceanic Next - a complete theme in one file (system fonts). */
+:root {
+  --bg: #1b2b34;
+  --panel: #16232a;
+  --hover: #343d46;
+  --line: #4f5b66;
+  --text: #d8dee9;
+  --muted: #a7adba;
+  --accent: #6699cc;
+  --accent-text: #1b2b34;
+  --danger: #ec5f67;
+  --warn: #f99157;
+  --ok: #99c794;
+  --pA: #ec5f67;
+  --pB: #f99157;
+  --pC: #fac863;
+  --pD: #99c794;
+  --pX: #65737e;
+  --due-soon: #fac863;
+  --due-today: #f99157;
+  --due-over: #ec5f67;
+  color-scheme: dark;
+}

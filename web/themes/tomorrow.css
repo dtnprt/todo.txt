@@ -1,0 +1,23 @@
+/* Tomorrow - a complete theme in one file (system fonts). */
+:root {
+  --bg: #ffffff;
+  --panel: #f5f5f5;
+  --hover: #efefef;
+  --line: #d6d6d6;
+  --text: #4d4d4c;
+  --muted: #6e706c;
+  --accent: #4271ae;
+  --accent-text: #ffffff;
+  --danger: #c82829;
+  --warn: #f5871f;
+  --ok: #718c00;
+  --pA: #c82829;
+  --pB: #f5871f;
+  --pC: #a88400;
+  --pD: #718c00;
+  --pX: #8e908c;
+  --due-soon: #a88400;
+  --due-today: #f5871f;
+  --due-over: #c82829;
+  color-scheme: light;
+}
