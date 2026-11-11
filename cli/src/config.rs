@@ -1,4 +1,4 @@
-//! Settings kept in `~/.config/todo.cfg` (in the user's profile; `%USERPROFILE%` on Windows).
+//! Settings kept in `~/.todo.txt/todo.cfg` (in the user's profile; `%USERPROFILE%` on Windows).
 //! Plain `key=value` lines; unknown keys are preserved so future versions can add more.
 
 use std::fs;
@@ -11,8 +11,19 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// `~/.todo.txt/todo.cfg`. An old `~/.config/todo.cfg` is copied there once.
 pub fn config_path() -> PathBuf {
-    home_dir().join(".config").join("todo.cfg")
+    let new = home_dir().join(".todo.txt").join("todo.cfg");
+    if !new.exists() {
+        let old = home_dir().join(".config").join("todo.cfg");
+        if old.exists() {
+            if let Some(dir) = new.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = fs::copy(&old, &new);
+        }
+    }
+    new
 }
 
 #[derive(Debug, Default, Clone)]

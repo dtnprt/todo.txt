@@ -1,0 +1,38 @@
+/* Grand Theft Six - purple dusk to peach sunset, palm silhouettes, wide-spaced caps (system fonts, no embedded font). */
+:root {
+  --bg: #3a1f5c;
+  --panel: rgba(58, 31, 92, .72);
+  --hover: rgba(255, 143, 112, .22);
+  --line: rgba(255, 176, 140, .32);
+  --text: #fbe9ef;
+  --muted: #c9a3d6;
+  --accent: #ff7a9c;
+  --accent-text: #2a1146;
+  --danger: #ff5c7a;
+  --warn: #ffb067;
+  --ok: #7fe0c0;
+  --pA: #ff5c7a;
+  --pB: #ff9a5c;
+  --pC: #ffd27a;
+  --pD: #9be3d0;
+  --pX: #c9a3d6;
+  color-scheme: dark;
+  --font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 15px;
+  /* sky: deep violet at the top, magenta, then warm peach at the horizon; a dark palm/skyline silhouette at the bottom */
+  --bg-image:
+    linear-gradient(180deg, rgba(42, 17, 70, 0) 72%, rgba(36, 14, 60, .85) 100%),
+    radial-gradient(ellipse 40% 30% at 85% 100%, rgba(36, 14, 60, .9), transparent 70%),
+    radial-gradient(ellipse 35% 28% at 10% 100%, rgba(36, 14, 60, .9), transparent 70%),
+    linear-gradient(180deg, #4b2a7a 0%, #8c4f9e 38%, #d9709a 62%, #ff9d7d 85%, #ffbf8f 100%);
+}
+body { background-attachment: fixed; background-size: cover; }
+
+.topbar, .status { background: rgba(36, 14, 60, .55); backdrop-filter: blur(6px); }
+.topbar .title { letter-spacing: .28em; text-transform: uppercase; font-weight: 300; }
+.tasks, .composer-box, .dd-menu, .ac { backdrop-filter: blur(8px); border-color: var(--line); }
+.tasks { box-shadow: 0 10px 30px -10px rgba(20, 5, 40, .6); }
+.composer-box { background: rgba(36, 14, 60, .6); }
+.dd-menu, .ac { background: rgba(48, 22, 78, .94); }
+.help-box { background: color-mix(in srgb, #3a1f5c 92%, transparent); }
+button.primary { background: linear-gradient(90deg, #ff7a9c, #ff9d7d); color: #2a1146; border-color: transparent; }

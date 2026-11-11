@@ -200,18 +200,15 @@ pub fn slugify(text: &str) -> String {
     if s.is_empty() { "note".into() } else { s }
 }
 
-/// `Note-A`, `Note-B`, ...: the first name that no line uses and that has no note file yet.
+/// `Note-1`, `Note-2`, ...: the first name that no line uses and that has no note file yet.
 pub fn next_note_name(lines: &[String], folder: Option<&Path>) -> String {
     let used: HashSet<String> = lines
         .iter()
         .flat_map(|l| note_names(&crate::todotxt::parse(l)))
         .map(|n| n.to_lowercase())
         .collect();
-    for n in 0.. {
-        let cand = match n {
-            0..=25 => format!("Note-{}", (b'A' + n as u8) as char),
-            _ => format!("Note-{}", n + 1),
-        };
+    for n in 1.. {
+        let cand = format!("Note-{n}");
         if !used.contains(&cand.to_lowercase()) && !note_file(folder, &cand).exists() {
             return cand;
         }
@@ -382,11 +379,11 @@ mod tests {
 
     #[test]
     fn several_notes_per_task() {
-        let t = crate::todotxt::parse("(A) call mom note:Note-A note:b.c note:../x");
-        assert_eq!(note_names(&t), vec!["Note-A", "b.c"]);
-        assert_eq!(note_name(&t).as_deref(), Some("Note-A"));
-        let lines = vec!["x note:Note-A".to_string(), "y note:note-b".to_string()];
-        assert_eq!(next_note_name(&lines, Some(Path::new("."))), "Note-C");
+        let t = crate::todotxt::parse("(A) call mom note:Note-1 note:b.c note:../x");
+        assert_eq!(note_names(&t), vec!["Note-1", "b.c"]);
+        assert_eq!(note_name(&t).as_deref(), Some("Note-1"));
+        let lines = vec!["x note:Note-1".to_string(), "y note:note-2".to_string()];
+        assert_eq!(next_note_name(&lines, Some(Path::new("."))), "Note-3");
     }
 }
 

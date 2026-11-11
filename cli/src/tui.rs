@@ -210,7 +210,7 @@ struct App {
     show_done: bool,
     show_sidebar: bool,
     calendar: bool,
-    /// Status line at the bottom (F11).
+    /// Status line at the bottom (Ctrl+L).
     show_status: bool,
     filter: Filter,
     view: Vec<usize>,
@@ -1074,7 +1074,7 @@ impl App {
                 self.msg = Some(format!("Calendar when typing dates: {}", if self.calendar { "on" } else { "off" }));
                 return;
             }
-            KeyCode::F(11) => {
+            KeyCode::Char('l') if ctrl => {
                 self.show_status = !self.show_status;
                 self.save_view();
                 return;
@@ -1091,7 +1091,7 @@ impl App {
                 self.git_menu = if self.git_menu.is_some() { None } else { Some(0) };
                 return;
             }
-            KeyCode::F(12) => {
+            KeyCode::Char('k') if ctrl => {
                 // add the open file to the known files and make it the default (a file opened with -f from
                 // another folder is otherwise only used for this run)
                 let (p, f) = (self.path.clone(), self.folder.clone());
@@ -1725,8 +1725,8 @@ impl App {
             "Dates:     due:tomorrow  due:+3d  due:next week  due:24.12.  due:24.12.2026",
             "Global:    F2 sort   F3 show/hide done   F4 sidebar   F5 archive done",
             "           F6 calendar on/off   F7 note of the task   F8 file / folder selector",
-            "           F12 remember this file (add to known files, make it the default)",
-            "           F11 status line on/off",
+            "           Ctrl+K remember this file (add to known files, make it the default)",
+            "           Ctrl+L status line on/off",
             "           F9 git sync now   F10 git settings (support, auto, pull, commit, push, init;",
             "           stored in .todo-git.cfg of the folder, same as the desktop app)",
             "           Ctrl+Q quit   every change is saved at once; view settings are remembered",

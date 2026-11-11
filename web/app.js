@@ -18,7 +18,7 @@ const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
 const baseName = (p) => p.split(/[\\/]/).pop();
 
 // One theme = one CSS file in web/themes/NAME.css (body class `theme-NAME`). To add a theme: drop the file there and add its name here.
-const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night', 'zelda'];
+const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night', 'zelda'];
 // Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
 const themeClass = (t) => 'theme-' + t.replace(/[^\w-]/g, '-');
@@ -529,12 +529,9 @@ if (isTauri) {
   window.addEventListener('focus', checkExternalChange);
 }
 
-// ---------- shared config with the terminal app (~/.config/todo.cfg, key=value lines) ----------
+// ---------- shared config with the terminal app (~/.todo.txt/todo.cfg, key=value lines) ----------
 
-async function cfgPath() {
-  const home = await tauri.path.homeDir();
-  return `${home.replace(/[\\/]+$/, '')}/.config/todo.cfg`;
-}
+const cfgPath = () => invoke('cfg_path');   // ~/.todo.txt/todo.cfg (migrates the old ~/.config/todo.cfg)
 
 /** Set `key=value` in todo.cfg, keeping all other lines. */
 async function setCfg(key, value) {
@@ -757,7 +754,7 @@ async function archiveDone() {
 }
 
 // ---------- note: longer text kept next to the todo file(s) ----------
-// A task can have several notes (`note:Note-A note:Note-B`); each is a file NAME.txt in the notes folder.
+// A task can have several notes (`note:Note-1 note:Note-2`); each is a file NAME.txt in the notes folder.
 // Desktop: `<folder>/notes/NAME.txt` in folder mode, else `~/.todo.txt/notes/NAME.txt` (Rust commands);
 // WebDAV file: `notes/NAME.txt` next to the todo file on the server.
 // Browser: `notes/NAME.txt` in the opened folder, else localStorage.
@@ -809,7 +806,7 @@ const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const allNoteNames = () => state.lines.flatMap((l) => T.noteNames(T.parse(l)));
 
 /**
- * Overlay editor for a note (same box as Settings): a name field (default `Note-A`, `Note-B`, ...) and, when the
+ * Overlay editor for a note (same box as Settings): a name field (default `Note-1`, `Note-2`, ...) and, when the
  * entry has notes, a dropdown of all of them (choosing one saves this note and opens that one).
  *   names: the entry's notes · taken(n): the name belongs to something else
  *   onSave(name, text) runs on save · onPick(name|null) after the dialog closed because another note (null = new) was chosen
@@ -865,7 +862,7 @@ function noteDialog({ name, names, isNew, text, taken, onSave, onPick, onClose }
 }
 
 /**
- * Edit a note of line `i`. `which`: a note name; null = a new note (named Note-A, Note-B, ...); undefined = the first
+ * Edit a note of line `i`. `which`: a note name; null = a new note (named Note-1, Note-2, ...); undefined = the first
  * note, or a new one if the task has none.
  */
 async function editNote(i, which) {
@@ -1566,7 +1563,7 @@ function buildThemeMenu() {
     b.onclick = () => { state.theme = name; persist(); render(); };
     menu.append(b);
   };
-  for (const name of ['', ...THEMES]) add(name, name ? name[0].toUpperCase() + name.slice(1) : 'Default (system light/dark)');
+  for (const name of ['', ...THEMES]) add(name, name ? (name === 'grand-theft-six' ? 'Grand Theft Six' : name[0].toUpperCase() + name.slice(1)) : 'Default (system light/dark)');
   const own = Object.keys(userThemes).sort();
   if (own.length) {
     menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Own themes (~/.todo.txt/themes)' }));
@@ -1589,6 +1586,8 @@ async function loadUserThemes() {
 }
 buildThemeMenu();
 loadUserThemes();
+// No browser context menu (right click) outside the input fields.
+document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 // Settings overlay (gear): tabs, scrolls when the window is small.
 const settingsEl = $('#settings');
 function showTab(name) {

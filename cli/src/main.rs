@@ -37,7 +37,7 @@ use store::Store;
     about = "todo.txt on the command line",
     long_about = "todo.txt on the command line.\n\n\
         Without arguments the interactive terminal UI opens on the last used file\n\
-        (remembered in ~/.config/todo.cfg). Text without a switch is added as a new task.",
+        (remembered in ~/.todo.txt/todo.cfg). Text without a switch is added as a new task.",
     after_help = "EXAMPLES:\n  \
         todo \"(A) call mom +Family @phone due:tomorrow\"   add a task\n  \
         todo -l -s due                                    list, sorted by due date\n  \

@@ -21,6 +21,20 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// `~/.todo.txt/todo.cfg` (shared with the CLI); an old `~/.config/todo.cfg` is copied there once.
+#[tauri::command]
+fn cfg_path() -> String {
+    let new = home_dir().join(".todo.txt").join("todo.cfg");
+    if !new.exists() {
+        let old = home_dir().join(".config").join("todo.cfg");
+        let _ = fs::create_dir_all(home_dir().join(".todo.txt"));
+        if old.exists() {
+            let _ = fs::copy(&old, &new);
+        }
+    }
+    new.to_string_lossy().replace('\\', "/")
+}
+
 /// Dot files and (on Windows) files with the "hidden" attribute.
 fn is_hidden(name: &str, meta: &fs::Metadata) -> bool {
     if name.starts_with('.') {
@@ -369,6 +383,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            cfg_path,
             list_txt_files,
             read_note,
             write_note,

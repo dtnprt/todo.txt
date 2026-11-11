@@ -144,11 +144,11 @@ export function noteName(task) {
   return noteNames(task)[0] || null;
 }
 
-/** `Note-A`, `Note-B`, ... : the first name not in `used` (compared case-insensitively). */
+/** `Note-1`, `Note-2`, ... : the first name not in `used` (compared case-insensitively). */
 export function nextNoteName(used) {
   const low = new Set([...used].map((n) => n.toLowerCase()));
-  for (let i = 0; ; i++) {
-    const cand = i < 26 ? `Note-${String.fromCharCode(65 + i)}` : `Note-${i + 1}`;
+  for (let i = 1; ; i++) {
+    const cand = `Note-${i}`;
     if (!low.has(cand.toLowerCase())) return cand;
   }
 }
