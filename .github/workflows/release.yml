@@ -1,0 +1,126 @@
+name: release
+
+# Push a tag like v0.1.2 (must match the VERSION file) to build everything and publish a GitHub release.
+# Run manually (Actions -> release -> Run workflow) to only build and get the files as workflow artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          [ "${GITHUB_REF_NAME}" = "v$(tr -d '[:space:]' < VERSION)" ] || { echo "tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1; }
+
+  web:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parser tests
+        working-directory: web
+        run: npm test
+      - name: Zip the web app
+        run: |
+          zip -r todo-txt-web.zip web -x 'web/test/*' 'web/package.json' 'web/version.json'
+      - uses: actions/upload-artifact@v4
+        with: { name: web, path: todo-txt-web.zip }
+
+  cli:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,  name: todo-linux-x86_64,   bin: todo }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,    name: todo-windows-x86_64, bin: todo.exe }
+          - { os: macos-13,       target: x86_64-apple-darwin,       name: todo-macos-x86_64,   bin: todo }
+          - { os: macos-latest,   target: aarch64-apple-darwin,      name: todo-macos-arm64,    bin: todo }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: cli }
+      - name: Test
+        working-directory: cli
+        run: cargo test --target ${{ matrix.target }}
+      - name: Build
+        working-directory: cli
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          mkdir out
+          cp "cli/target/${{ matrix.target }}/release/${{ matrix.bin }}" "out/${{ matrix.bin }}"
+          cp README.md LICENSE out/
+          cd out
+          if [ "${{ runner.os }}" = "Windows" ]; then 7z a "../${{ matrix.name }}.zip" . >/dev/null; else tar czf "../${{ matrix.name }}.tar.gz" .; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}.zip
+            ${{ matrix.name }}.tar.gz
+          if-no-files-found: ignore
+
+  # Desktop app (Tauri). macOS is left out until src-tauri/icons has an icon.icns (cargo tauri icon).
+  desktop:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,   name: desktop-linux }
+          - { os: windows-latest, name: desktop-windows }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - name: Build (tauri-action without a tag only builds; the release job publishes)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*-setup.exe
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.AppImage
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web, cli, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: ls -R dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: true
