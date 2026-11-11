@@ -23,6 +23,33 @@ const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato',
 // Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
 const themeClass = (t) => 'theme-' + t.replace(/[^\w-]/g, '-');
+// Theme families: the list shows only the family name, the variant (light/dark/...) is chosen in a second dropdown.
+// [variant label, theme file]; the first entry is the default. Own themes named `NAME-light` / `NAME-dark` are grouped the same way.
+const THEME_FAMILIES = {
+  catppuccin: [['Mocha', 'catppuccin-mocha'], ['Macchiato', 'catppuccin-macchiato'], ['Frappé', 'catppuccin-frappe'], ['Latte', 'catppuccin-latte']],
+  iceberg: [['Dark', 'iceberg'], ['Light', 'iceberg-light']],
+  nord: [['Dark', 'nord'], ['Light', 'nord-light']],
+  onehalf: [['Dark', 'onehalf-dark'], ['Light', 'onehalf-light']],
+  rosepine: [['Main', 'rosepine'], ['Moon', 'rosepine-moon'], ['Dawn', 'rosepine-dawn']],
+  solarized: [['Dark', 'solarized-dark'], ['Light', 'solarized-light']],
+  tokyonight: [['Night', 'tokyonight'], ['Storm', 'tokyonight-storm'], ['Day', 'tokyonight-day']],
+  tomorrow: [['Night', 'tomorrow-night'], ['Day', 'tomorrow']],
+};
+/** family key of a theme value ('nord-light' -> 'nord', 'user:x-dark' -> 'user:x', else the value itself) */
+function themeKey(t) {
+  for (const [k, v] of Object.entries(THEME_FAMILIES)) if (v.some(([, f]) => f === t)) return k;
+  const m = /^user:(.+)-(light|dark)$/.exec(t);
+  return m ? 'user:' + m[1] : t;
+}
+/** variants [[label, value]] of a family key (empty/1 entry = no variants) */
+function themeVariants(key) {
+  if (THEME_FAMILIES[key]) return THEME_FAMILIES[key];
+  if (key.startsWith('user:')) {
+    const base = key.slice(5);
+    return ['dark', 'light'].filter((v) => userThemes[`${base}-${v}`] !== undefined).map((v) => [v[0].toUpperCase() + v.slice(1), `user:${base}-${v}`]);
+  }
+  return [];
+}
 
 function applyTheme() {
   let link = document.getElementById('themeLink');
@@ -37,7 +64,7 @@ function applyTheme() {
   else if (!link) { link = el('link', { id: 'themeLink', rel: 'stylesheet', href: want }); document.head.append(link); }
   else if (link.getAttribute('href') !== want) link.setAttribute('href', want);
   document.body.className = document.body.className.split(/\s+/).filter((c) => c && !c.startsWith('theme-')).concat(state.theme ? [themeClass(state.theme)] : []).join(' ');
-  document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.theme === state.theme)));
+  document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.theme === themeKey(state.theme))));
 }
 
 const state = {
@@ -1721,19 +1748,33 @@ function togglePrioPopup(anchor, current, pick) {
 function buildThemeMenu() {
   const menu = $('#themeMenu');
   menu.replaceChildren();
-  const add = (name, label) => {
-    const b = el('button', { role: 'menuitemradio' }, el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' })), ' ' + label);
-    b.dataset.theme = name;
-    b.onclick = () => { state.theme = name; persist(); render(); };
+  const label = (key) => key === 'grand-theft-six' ? 'Grand Theft Six' : key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
+  const cur = themeKey(state.theme);
+  const vars = cur ? themeVariants(cur) : [];
+  if (vars.length > 1) {   // variant dropdown of the chosen theme
+    const sel = el('select', { id: 'themeVariant', title: 'Variant of this theme' });
+    for (const [l, v] of vars) sel.append(el('option', { value: v, textContent: l, selected: v === state.theme }));
+    sel.onchange = () => { state.theme = sel.value; persist(); render(); };
+    menu.append(el('label', { className: 'theme-variant' }, 'Variant ', sel));
+  }
+  const add = (key, text) => {
+    const b = el('button', { role: 'menuitemradio' }, el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' })), ' ' + text);
+    b.dataset.theme = key;
+    b.onclick = () => {
+      const v = key ? themeVariants(key) : [];
+      state.theme = !key ? '' : !v.length ? key : (v.find(([, f]) => f === state.theme) || (v.find(([l]) => l === (themeVariants(cur).find(([, f]) => f === state.theme) || [])[0]) || v[0]))[1];
+      persist(); render(); buildThemeMenu();
+    };
     menu.append(b);
   };
-  for (const name of ['', ...THEMES]) add(name, name ? (name === 'grand-theft-six' ? 'Grand Theft Six' : name[0].toUpperCase() + name.slice(1)) : 'Default (system light/dark)');
-  const own = Object.keys(userThemes).sort();
+  const keys = [...new Set(['', ...THEMES.map(themeKey)])];
+  for (const key of keys) add(key, key ? label(key) : 'Default (system light/dark)');
+  const own = [...new Set(Object.keys(userThemes).sort().map((n) => themeKey('user:' + n)))];
   if (own.length) {
     menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Own themes (~/.todo.txt/themes)' }));
-    for (const n of own) add('user:' + n, n);
+    for (const k of own) add(k, label(k));
   } else if (isTauri) {
-    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Put your own NAME.css in ~/.todo.txt/themes/ to add a theme.' }));
+    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Put your own NAME.css in ~/.todo.txt/themes to add a theme (NAME-light.css / NAME-dark.css give a variant dropdown).' }));
   }
   if (isTauri) {
     const ex = el('button', { type: 'button', className: 'theme-export', title: 'Write all built-in themes as NAME.css into ~/.todo.txt/themes (existing files are kept) so you can edit them' },
@@ -2034,6 +2075,7 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 restore();
+buildThemeMenu();
 render();
 loadVersion();
 // height of the add/search bar for the sidebar (it scrolls above the bar instead of under it)

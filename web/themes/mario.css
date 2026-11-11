@@ -21,16 +21,16 @@
   --pX: #6b4a14;
   color-scheme: light;
   --font: 'Press Start 2P', monospace;
-  --font-size: 16px;   /* Press Start 2P is an 8x8 pixel font: only multiples of 8px render crisp */
+  --font-size: 12px;   /* Press Start 2P is an 8x8 pixel font: crispest at multiples of 8px, 12px is a compromise */
 }
 
-body { line-height: 1.9; }
+body { line-height: 1.8; }
 
-/* keep every text size a multiple of 8px so the pixel font stays sharp */
-.topbar h1 { font-size: 16px; }
-.status, kbd, .dd-menu kbd, .set-pane kbd, button.icon, .topbar .dd > .dd-btn { font-size: 16px; }
-.status, kbd, .dd-menu kbd, .set-pane kbd, .help-row kbd { font-size: 8px; }
-.status button { font-size: 8px; }
+/* keep the small texts small */
+.topbar h1 { font-size: 12px; }
+.topbar .dd > .dd-btn, button.icon { font-size: 12px; }
+.sidebar h2 { font-size: 8px; }
+.status, kbd, .dd-menu kbd, .set-pane kbd, .help-row kbd, .status button { font-size: 8px; }
 body, button, input, textarea { text-rendering: optimizeSpeed; -webkit-font-smoothing: none; }
 
 :root {

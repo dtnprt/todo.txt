@@ -421,3 +421,7 @@ body.android .set-box, body.android .files-box { inset: 8px; }
 .files-pick button { min-height: 44px; }
 body.android .composer { margin-left: 0; }
 body.android .sidebar { margin-left: 0; }
+
+/* theme variant dropdown (Settings -> Appearance) */
+.theme-variant { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.theme-variant select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }

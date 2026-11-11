@@ -33,51 +33,90 @@
   --lcars-orange: #ff9900;
 }
 
-/* Background images (from the original theme) */
+/* LCARS frame drawn with plain CSS: orange elbow + bar on top (the top bar sits in it), colour blocks in the left column
+   (the sidebar sits between the elbow and the blocks), status bar in the bottom band. --col = width of the left column. */
 body.theme-lcars {
+  --col: 140px;
+  --lcars-blocks-tall: 0;
   background: #000;
-  padding: 8.25rem 2.5rem 8.75rem 11.875rem;
+  padding: 100px 22px 50px calc(14px + var(--col) + 24px);
 }
 
+/* left column: elbow, label, blocks (bottom up: lilac, purple, peach, blue) */
 body.theme-lcars::before {
   content: "";
   position: fixed;
-  inset: 0.875rem;
-  z-index: -1;
+  left: 14px; top: 14px; bottom: 14px;
+  width: var(--col);
+  z-index: -2;
   pointer-events: none;
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='100' viewBox='0 0 300 100'%3E%3Cpath d='M0 100 V56 A56 56 0 0 1 56 0 H300 V28 H172 A32 32 0 0 0 140 60 V100 Z' fill='%23ff9900'/%3E%3Ctext x='132' y='93' text-anchor='end' font-family='Arial Narrow, Arial, sans-serif' font-weight='700' font-size='15' fill='%23000000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
-    linear-gradient(90deg,
-      var(--lcars-lilac) 0 30%, transparent 30% calc(30% + 0.375rem),
-      var(--lcars-peach) calc(30% + 0.375rem) 62%, transparent 62% calc(62% + 0.375rem),
-      var(--lcars-blue) calc(62% + 0.375rem) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M0 0 H14 A14 14 0 0 1 14 28 H0 Z' fill='%239999ff'/%3E%3C/svg%3E"),
-    repeating-linear-gradient(180deg,
-      var(--lcars-peach) 0 5.625rem, transparent 5.625rem 6rem,
-      var(--lcars-purple) 6rem 13.125rem, transparent 13.125rem 13.5rem,
-      var(--lcars-gold) 13.5rem 16.375rem, transparent 16.375rem 16.75rem,
-      var(--lcars-blue) 16.75rem 25rem, transparent 25rem 25.375rem),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='100' viewBox='0 0 300 100'%3E%3Cpath d='M0 0 V44 A56 56 0 0 0 56 100 H300 V72 H172 A32 32 0 0 1 140 40 V0 Z' fill='%23cc99cc'/%3E%3Ctext x='132' y='20' text-anchor='end' font-family='Arial Narrow, Arial, sans-serif' font-weight='700' font-size='15' fill='%23000000'%3E04-7715%3C/text%3E%3C/svg%3E"),
-    linear-gradient(90deg,
-      var(--lcars-purple) 0 18%, transparent 18% calc(18% + 0.375rem),
-      var(--lcars-orange) calc(18% + 0.375rem) 70%, transparent 70% calc(70% + 0.375rem),
-      var(--lcars-gold) calc(70% + 0.375rem) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M0 0 H14 A14 14 0 0 1 14 28 H0 Z' fill='%23ff9966'/%3E%3C/svg%3E");
+  border-radius: 70px 0 0 44px;
   background-repeat: no-repeat;
-  background-position:
-    left top,
-    left 19.125rem top,
-    right top,
-    left 0 top 6.625rem,
-    left bottom,
-    left 19.125rem bottom,
-    right bottom;
-  background-size:
-    18.75rem 6.25rem,
-    calc(100% - 19.125rem - 1.25rem) 1.75rem,
-    1.75rem 1.75rem,
-    8.75rem calc(100% - 13.25rem),
-    18.75rem 6.25rem,
-    calc(100% - 19.125rem - 1.25rem) 1.75rem,
-    1.75rem 1.75rem;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3E04-7715%3C/text%3E%3C/svg%3E"),
+    linear-gradient(var(--lcars-orange), var(--lcars-orange)),
+    linear-gradient(var(--lcars-lilac), var(--lcars-lilac)),
+    linear-gradient(var(--lcars-purple), var(--lcars-purple));
+  background-position: left 0 top 76px, left 0 bottom 65px, left top, left bottom, left 0 bottom 93px;
+  background-size: 140px 20px, 140px 20px, 100% 101px, 100% 87px, 100% 75px;
+}
+
+/* top bar (orange) with the concave corner where the content area begins */
+body.theme-lcars::after {
+  content: "";
+  position: fixed;
+  left: calc(14px + var(--col)); right: 14px; top: 14px; height: 101px;
+  z-index: -2;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-image:
+    linear-gradient(var(--lcars-orange), var(--lcars-orange)),
+    radial-gradient(circle at 100% 100%, transparent 29px, var(--lcars-orange) 30px);
+  background-position: left top, left 0 top 71px;
+  background-size: 100% 71px, 30px 30px;
+}
+@media (min-height: 780px) {
+  body.theme-lcars::before {
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3E04-7715%3C/text%3E%3C/svg%3E"),
+      linear-gradient(var(--lcars-orange), var(--lcars-orange)),
+      linear-gradient(var(--lcars-lilac), var(--lcars-lilac)),
+      linear-gradient(var(--lcars-purple), var(--lcars-purple)),
+      linear-gradient(var(--lcars-peach), var(--lcars-peach)),
+      linear-gradient(var(--lcars-blue), var(--lcars-blue));
+    background-position: left 0 top 76px, left 0 bottom 65px, left top, left bottom, left 0 bottom 93px, left 0 bottom 174px, left 0 bottom 270px;
+    background-size: 140px 20px, 140px 20px, 100% 101px, 100% 87px, 100% 75px, 100% 90px, 100% 119px;
+  }
+  body.theme-lcars { --lcars-blocks-tall: 1; }
+}
+
+/* the three bars live inside the frame */
+body.theme-lcars .topbar { position: fixed; top: 22px; left: calc(14px + var(--col) + 16px); right: 22px; border: 1px solid var(--line); border-radius: 8px; }
+body.theme-lcars .status { left: calc(14px + var(--col) + 16px); right: 14px; bottom: 14px; width: auto; border: 1px solid var(--line); border-radius: 6px; line-height: 26px; }
+body.theme-lcars .composer { bottom: 50px; }
+body.minimal.theme-lcars .topbar { opacity: 0; pointer-events: none; transform: none; box-shadow: none; transition: opacity .15s; }
+body.minimal.show-bar.theme-lcars .topbar { opacity: 1; pointer-events: auto; }
+body.minimal.theme-lcars, body.nostatus.theme-lcars { padding-bottom: 22px; }
+body.minimal.theme-lcars .composer, body.nostatus.theme-lcars .composer { bottom: 22px; }
+
+@media (min-width: 721px) {
+  /* sidebar inside the left column, entries and input to the right of it */
+  body.theme-lcars { padding-left: 22px; }
+  body.theme-lcars .layout { grid-template-columns: calc(var(--col) - 8px) minmax(0, 1fr); column-gap: 24px; padding: 0; }
+  body.theme-lcars .layout.no-side { grid-template-columns: minmax(0, 1fr); padding-left: calc(14px + var(--col) + 2px); }
+  body.theme-lcars .layout.no-side #list, body.theme-lcars .layout.no-side #raw { grid-column: 1; }
+  body.theme-lcars .composer { grid-column: 2; margin-left: 0; }
+  body.theme-lcars .layout.no-side .composer { grid-column: 1; }
+  body.theme-lcars .sidebar { margin: 22px 0 0; top: 115px; max-height: calc(100vh - 115px - 14px - 168px - 8px); }
+  body.theme-lcars.nostatus .sidebar, body.minimal.theme-lcars .sidebar { top: 115px; max-height: calc(100vh - 115px - 14px - 168px - 8px); }
+}
+@media (min-width: 721px) and (min-height: 780px) {
+  body.theme-lcars .sidebar, body.theme-lcars.nostatus .sidebar, body.minimal.theme-lcars .sidebar { max-height: calc(100vh - 115px - 14px - 389px - 8px); }
+}
+@media (max-width: 720px) {
+  body.theme-lcars { --col: 40px; }
+  body.theme-lcars::before { background-image: linear-gradient(var(--lcars-orange), var(--lcars-orange)), linear-gradient(var(--lcars-lilac), var(--lcars-lilac)); background-position: left top, left bottom; background-size: 100% 101px, 100% 87px; }
+  body.theme-lcars::after { left: calc(14px + var(--col)); }
 }

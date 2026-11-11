@@ -80,11 +80,20 @@ body.theme-manuscript::after {
   opacity: 0.9;
 }
 
-/* the fixed bars stay inside the border; in minimal mode (no bars) the border simply floats around the window */
-body.theme-manuscript .topbar { top: 1.2rem; }
-body.theme-manuscript .status { left: 1.2rem; right: 1.2rem; bottom: 1.2rem; width: auto; }
+/* top bar above the frame, status bar below it; in minimal mode (no bars) the border simply floats around the window */
+body.theme-manuscript { padding-top: calc(55px + 1.6rem); }
+body.theme-manuscript .topbar { position: fixed; top: 0; left: 0; right: 0; }
+body.theme-manuscript::before { top: calc(55px + 0.45rem); bottom: calc(28px + 0.45rem); }
+body.theme-manuscript::after { top: calc(55px + 6.5rem); bottom: calc(28px + 6.5rem); }
+body.theme-manuscript .sidebar { top: calc(55px + 1.6rem); }
 body.theme-manuscript .composer { bottom: calc(28px + 1.2rem); }
 body.minimal.theme-manuscript, body.nostatus.theme-manuscript { padding-bottom: 1.6rem; }
+body.minimal.theme-manuscript { padding-top: 1.6rem; }
+body.nostatus.theme-manuscript::before { bottom: 0.45rem; }
+body.nostatus.theme-manuscript::after { bottom: 6.5rem; }
+body.minimal.theme-manuscript::before { top: 0.45rem; }
+body.minimal.theme-manuscript::after { top: 6.5rem; }
 body.minimal.theme-manuscript .composer, body.nostatus.theme-manuscript .composer { bottom: 1.2rem; }
-body.minimal.theme-manuscript .topbar { top: 1.2rem; left: 1.2rem; right: 1.2rem; }
+body.minimal.theme-manuscript .topbar { top: 1.2rem; left: 1.2rem; right: 1.2rem; transform: translateY(calc(-100% - 2rem)); box-shadow: none; }
+body.minimal.show-bar.theme-manuscript .topbar { transform: none; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 body.minimal.theme-manuscript .sidebar { top: 1.6rem; }
