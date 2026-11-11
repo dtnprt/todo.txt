@@ -508,13 +508,107 @@ fn delete_file(path: String) -> Result<(), String> {
     fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
+/// Window geometry (desktop): `~/.todo.txt/window.cfg`, lines `x=`, `y=`, `w=`, `h=`, `max=` (physical pixels).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod winstate {
+    use super::{fs, home_dir};
+    use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow, Window};
+
+    fn file() -> std::path::PathBuf {
+        home_dir().join(".todo.txt").join("window.cfg")
+    }
+
+    fn load() -> Option<(i32, i32, u32, u32, bool)> {
+        let text = fs::read_to_string(file()).ok()?;
+        let get = |k: &str| {
+            text.lines()
+                .find_map(|l| l.strip_prefix(&format!("{k}=")))
+                .map(|v| v.trim().to_string())
+        };
+        Some((
+            get("x")?.parse().ok()?,
+            get("y")?.parse().ok()?,
+            get("w")?.parse().ok()?,
+            get("h")?.parse().ok()?,
+            get("max").map(|v| v == "true").unwrap_or(false),
+        ))
+    }
+
+    /// Restore the saved geometry; if it is not on any monitor, centre on the primary one.
+    pub fn restore(win: &WebviewWindow) {
+        let Some((x, y, w, h, max)) = load() else { return };
+        let monitors = win.available_monitors().unwrap_or_default();
+        let (w, h) = (w.max(400), h.max(300));
+        // visible = at least 120x60 px of the window overlap one monitor
+        let visible = monitors.iter().any(|m| {
+            let (mp, ms) = (m.position(), m.size());
+            let ox = (x + w as i32).min(mp.x + ms.width as i32) - x.max(mp.x);
+            let oy = (y + h as i32).min(mp.y + ms.height as i32) - y.max(mp.y);
+            ox >= 120 && oy >= 60
+        });
+        if visible {
+            let _ = win.set_size(PhysicalSize::new(w, h));
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+        } else if let Ok(Some(m)) = win.primary_monitor().or_else(|_| win.current_monitor()) {
+            let (mp, ms) = (m.position(), m.size());
+            let (w, h) = (w.min(ms.width), h.min(ms.height));
+            let _ = win.set_size(PhysicalSize::new(w, h));
+            let _ = win.set_position(PhysicalPosition::new(
+                mp.x + (ms.width - w) as i32 / 2,
+                mp.y + (ms.height - h) as i32 / 2,
+            ));
+        }
+        if max {
+            let _ = win.maximize();
+        }
+    }
+
+    pub fn save(win: &Window) {
+        if win.is_minimized().unwrap_or(false) {
+            return;
+        }
+        let max = win.is_maximized().unwrap_or(false);
+        let old = load();
+        let (x, y, w, h) = if max {
+            // keep the last normal geometry
+            match old {
+                Some((x, y, w, h, _)) => (x, y, w, h),
+                None => return,
+            }
+        } else {
+            match (win.outer_position(), win.inner_size()) {
+                (Ok(p), Ok(s)) => (p.x, p.y, s.width, s.height),
+                _ => return,
+            }
+        };
+        let _ = fs::create_dir_all(home_dir().join(".todo.txt"));
+        let _ = fs::write(file(), format!("x={x}\ny={y}\nw={w}\nh={h}\nmax={max}\n"));
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .on_window_event(|_window, _event| {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::CloseRequested { .. } = _event
+            {
+                winstate::save(_window);
+            }
+        })
         .setup(|app| {
             davcache::set_interactive(); // fast WebDAV cache mode (davcache= in todo.cfg)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    winstate::restore(&win);
+                }
+            }
             // Android has no home folder: the private app folder plays that role (config, cache, credentials)
             #[cfg(target_os = "android")]
             {
