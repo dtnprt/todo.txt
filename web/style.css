@@ -423,5 +423,9 @@ body.android .composer { margin-left: 0; }
 body.android .sidebar { margin-left: 0; }
 
 /* theme variant dropdown (Settings -> Appearance) */
-.theme-variant { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.theme-variant { position: sticky; top: -4px; z-index: 1; background: var(--panel); padding: 6px 8px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: 13px; }
 .theme-variant select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; }
+
+/* no horizontal scrolling of the page */
+html { overflow-x: hidden; }
+body { overflow-x: clip; }

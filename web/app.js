@@ -22,7 +22,7 @@ const baseName = (p) => p.split(/[\\/]/).pop();
 const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'ghibli', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'sheikah', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night'];
 // Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
-const themeClass = (t) => 'theme-' + t.replace(/[^\w-]/g, '-');
+const themeClass = (t) => 'theme-' + t.replace(/^user:/, '').replace(/[^\w-]/g, '-');   // own themes use the same body class as the built-in one of that name (their artwork is `body.theme-NAME`)
 // Theme families: the list shows only the family name, the variant (light/dark/...) is chosen in a second dropdown.
 // [variant label, theme file]; the first entry is the default. Own themes named `NAME-light` / `NAME-dark` are grouped the same way.
 const THEME_FAMILIES = {
@@ -38,6 +38,9 @@ const THEME_FAMILIES = {
 /** family key of a theme value ('nord-light' -> 'nord', 'user:x-dark' -> 'user:x', else the value itself) */
 function themeKey(t) {
   for (const [k, v] of Object.entries(THEME_FAMILIES)) if (v.some(([, f]) => f === t)) return k;
+  if (t.startsWith('user:')) {
+    for (const [k, v] of Object.entries(THEME_FAMILIES)) if (v.some(([, f]) => 'user:' + f === t)) return 'user:' + k;
+  }
   const m = /^user:(.+)-(light|dark)$/.exec(t);
   return m ? 'user:' + m[1] : t;
 }
@@ -46,6 +49,7 @@ function themeVariants(key) {
   if (THEME_FAMILIES[key]) return THEME_FAMILIES[key];
   if (key.startsWith('user:')) {
     const base = key.slice(5);
+    if (THEME_FAMILIES[base]) return THEME_FAMILIES[base].filter(([, f]) => userThemes[f] !== undefined).map(([l, f]) => [l, 'user:' + f]);
     return ['dark', 'light'].filter((v) => userThemes[`${base}-${v}`] !== undefined).map((v) => [v[0].toUpperCase() + v.slice(1), `user:${base}-${v}`]);
   }
   return [];
@@ -1747,6 +1751,7 @@ function togglePrioPopup(anchor, current, pick) {
 
 function buildThemeMenu() {
   const menu = $('#themeMenu');
+  const keepScroll = menu.scrollTop;
   menu.replaceChildren();
   const label = (key) => key === 'grand-theft-six' ? 'Grand Theft Six' : key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
@@ -1783,6 +1788,7 @@ function buildThemeMenu() {
     menu.append(ex);
   }
   applyTheme();
+  menu.scrollTop = keepScroll;
 }
 /** Desktop: write every built-in theme to ~/.todo.txt/themes/NAME.css (never overwrites an existing file). */
 async function exportThemes() {
