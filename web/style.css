@@ -260,7 +260,11 @@ input[type=checkbox]:checked::after { visibility: visible; }
 body.minimal .status, body.nostatus .status { display: none !important; }
 body.minimal, body.nostatus { padding-bottom: 0; }
 body.minimal .composer, body.nostatus .composer { bottom: 0; }
-body.minimal .sidebar { top: 16px; max-height: calc(100vh - 16px - var(--composer-h, 76px) - 8px); }
+body.minimal .sidebar { top: 16px; max-height: calc(100vh - 32px); }
+/* minimal mode: the input floats over the entries; shown on hover near the bottom, on typing/focus */
+body.minimal .composer { position: fixed; left: 16px; right: 16px; bottom: 0; margin: 0; z-index: 30; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .15s, transform .15s; }
+body.minimal.nosidebar .composer, body.minimal .layout.no-side .composer { left: 16px; }
+body.minimal.show-input .composer, body.minimal .composer:focus-within, body.minimal .composer:hover { opacity: 1; transform: none; pointer-events: auto; }
 body.minimal .topbar { position: fixed; top: 0; left: 0; right: 0; transform: translateY(-110%); transition: transform .15s; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 body.minimal.show-bar .topbar { transform: none; }
 .win-ctl { display: inline-flex; gap: 2px; margin-left: 4px; }

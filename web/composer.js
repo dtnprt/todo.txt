@@ -540,7 +540,7 @@ export function createComposer({ form, input, hl, ac, modeBtn, getWords, onAdd, 
       ? 'Adding tasks. Click or press / to search'
       : 'Searching. Click or press Esc to add tasks';
     input.placeholder = mode === 'add'
-      ? 'Add a task and press Enter…'
+      ? ''
       : 'Search tasks…   (Esc to go back to adding)';
     input.setAttribute('aria-label', mode === 'add' ? 'New task' : 'Search tasks');
     closeAssist();

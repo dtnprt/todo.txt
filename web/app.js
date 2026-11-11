@@ -1461,7 +1461,7 @@ function render() {
   $('#touchBar').hidden = !state.touchBar || state.view === 'text';
   document.body.classList.toggle('minimal', state.minimal);
   document.body.classList.toggle('nostatus', !state.statusBar);
-  if (!state.minimal) document.body.classList.remove('show-bar');
+  if (!state.minimal) document.body.classList.remove('show-bar', 'show-input');
   applyTheme();
   $('#openFolder').style.display = isTauri || hasDirPicker ? '' : 'none';
   $('#openDav').style.display = isTauri ? '' : 'none';
@@ -1980,6 +1980,7 @@ document.addEventListener('mousedown', (e) => {
   const bar = document.querySelector('.topbar');
   document.addEventListener('mousemove', (e) => {
     if (!state.minimal) return;
+    document.body.classList.toggle('show-input', e.clientY > window.innerHeight - 80);
     const shown = document.body.classList.contains('show-bar');
     if (!shown) {
       const first = document.querySelector('#list .task, #raw:not([hidden])');
