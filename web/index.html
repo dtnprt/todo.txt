@@ -15,6 +15,7 @@
       <div class="dd-menu" id="fileList" role="menu" hidden></div>
     </div>
     <span id="dirty" class="dirty" hidden title="Unsaved changes">●</span>
+    <button id="undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
     <div class="dd">
       <button class="dd-btn" aria-haspopup="true" aria-expanded="false" title="File" aria-label="File"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> <i class="fa-solid fa-caret-down" aria-hidden="true"></i></button>
       <div class="dd-menu" role="menu" hidden>
@@ -55,7 +56,6 @@
     <button id="sideBtn" class="icon desktop-only" title="Show / hide sidebar (F4)" aria-label="Toggle sidebar"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></button>
     <div class="spacer"></div>
     <button id="filterBtn" class="icon android-only" title="Filters" aria-label="Filters"><i class="fa-solid fa-filter" aria-hidden="true"></i></button>
-    <button id="undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
     <button id="optBtn" class="icon" title="Settings" aria-label="Settings"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
     <span id="winCtl" class="win-ctl" hidden>
       <button class="icon" id="winMin" title="Minimize" aria-label="Minimize"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
@@ -87,6 +87,7 @@
 
   <div id="scrim" hidden></div>
   <div id="status" class="status"></div>
+  <div id="davCorner" class="dav-corner" hidden></div>
 
   <div id="settings" class="help settings" hidden>
     <div class="help-box set-box" role="dialog" aria-label="Settings">
@@ -121,7 +122,7 @@
         <div id="themeMenu" role="menu"></div>
         <div class="theme-foot">
           <div id="themeVariantBox" class="variant-box"></div>
-          <button id="themeReload" type="button" class="theme-reload" title="Rescan the themes folders and re-read the chosen theme (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Rescan themes <kbd>Ctrl+Shift+T</kbd></button>
+          <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
         </div>
       </div>
       <div class="set-pane" data-pane="webdav" hidden></div>

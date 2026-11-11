@@ -1504,6 +1504,7 @@ function render() {
   }
 
   if (!listMode) {
+    $('#davCorner').hidden = true;
     const ta = $('#raw');
     if (document.activeElement !== ta) ta.value = state.lines.join('\n');
     return;
@@ -1525,6 +1526,7 @@ function render() {
       el('button', { textContent: 'clear', onclick: () => { state.filter.project = []; state.filter.context = []; state.filter.priority = []; composer.clearSearch(); render(); } }));
   }
   status.replaceChildren();
+  let davShown = '', davFull = '';
   const gs = state.gitStatus;
   if (state.path && isRemote(state.path) && state.davState?.offline) {
     const p = state.davState.pending;
@@ -1543,12 +1545,19 @@ function render() {
       shown = `${host} - ${full.startsWith(base) ? full.slice(base.length) : decodeURI(new URL(state.path).pathname).replace(/^\/+/, '')}`;
     } catch { /* keep the full address */ }
     status.append(el('span', { className: 'status-folder status-dav', title: full, textContent: shown }));
+    davShown = shown; davFull = full;
   } else if (state.folder) {
     const base = state.folder.replace(/[\/]+$/, '').split(/[\/]/).pop() || state.folder;
     status.append(el('span', { className: 'status-folder', title: state.folder, textContent: base }));
   }
   if (gs) {
     status.append(el('span', { className: 'status-git' + (gs.changed ? ' dirty' : ' clean'), title: gs.summary ? `${gs.commit}: ${gs.summary}` : 'git', textContent: 'git: ' + gs.label }));
+  }
+  {   // minimal mode hides the status bar: show the WebDAV file small and faint in the bottom left corner instead
+    const dc = $('#davCorner');
+    dc.hidden = !(state.minimal && davShown);
+    dc.textContent = davShown;
+    dc.title = davFull;
   }
   statusHover = el('span', { className: 'status-hover' });
   status.append(statusHover, right);
@@ -1911,8 +1920,7 @@ async function reloadTheme() {
   applyTheme();
 }
 $('#themeReload').onclick = reloadTheme;
-// Pick up new/changed theme files without a restart: on window focus and every 4 s while the settings are open.
-window.addEventListener('focus', () => { loadUserThemes(); });
+// Pick up new/changed theme files without a restart: when the settings open (see optBtn) and every 4 s while they are open.
 setInterval(() => { if (!settingsEl.hidden) loadUserThemes(); }, 4000);
 buildThemeMenu();
 loadUserThemes();
