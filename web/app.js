@@ -101,6 +101,7 @@ const state = {
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
   autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
   frameless: false,    // desktop only; stored in todo.cfg (`frameless=`)
+  cornerName: true,    // minimal mode: small file name in the bottom left corner
   showDates: false,    // show created/done dates inside the entries (else only tooltip + status bar on hover)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
   sort: 'priority',
@@ -114,7 +115,7 @@ function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       lines: state.lines, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
-      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, showDates: state.showDates, theme: state.theme,
+      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
@@ -137,6 +138,7 @@ function restore() {
     state.statusBar = s.statusBar !== false;
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
+    if (typeof s.cornerName === 'boolean') state.cornerName = s.cornerName;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
     if (s.theme === 'nasa' || s.theme === 'user:nasa') s.theme = 'user:voyager-i';   // renamed
     if (s.theme === 'space' || s.theme === 'user:space') s.theme = 'user:space-game';   // renamed
@@ -859,6 +861,7 @@ async function loadAutoSave() {
     state.onTop = flag('ontop');
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
     if (/^\s*showdates\s*=/m.test(cfg)) state.showDates = flag('showdates');
+    if (/^\s*cornername\s*=/m.test(cfg)) state.cornerName = flag('cornername');
     if (/^\s*statusbar\s*=/m.test(cfg)) state.statusBar = flag('statusbar');   // shared with the terminal app
   } catch { /* no config yet: off */ }
   render();
@@ -1459,6 +1462,7 @@ function render() {
   $('#statusToggle').setAttribute('aria-checked', state.statusBar);
   $('#touchToggle').setAttribute('aria-checked', state.touchBar);
   $('#datesToggle').setAttribute('aria-checked', state.showDates);
+  $('#cornerToggle').setAttribute('aria-checked', state.cornerName);
   $('#touchBar').hidden = !state.touchBar || state.view === 'text';
   document.body.classList.toggle('minimal', state.minimal);
   document.body.classList.toggle('nostatus', !state.statusBar);
@@ -1555,7 +1559,7 @@ function render() {
   }
   {   // minimal mode hides the status bar: show the WebDAV file small and faint in the bottom left corner instead
     const dc = $('#davCorner');
-    dc.hidden = !(state.minimal && davShown);
+    dc.hidden = !(state.minimal && davShown && state.cornerName);
     dc.textContent = davShown;
     dc.title = davFull;
   }
@@ -1945,6 +1949,7 @@ $('#showDone').onclick = () => { state.showDone = !state.showDone; persist(); re
 $('#viewToggle').onclick = () => { state.view = state.view === 'list' ? 'text' : 'list'; render(); };
 $('#statusToggle').onclick = () => { state.statusBar = !state.statusBar; if (isTauri) setCfg('statusbar', state.statusBar); persist(); render(); };
 $('#minimalToggle').onclick = () => { state.minimal = !state.minimal; persist(); render(); };
+$('#cornerToggle').onclick = () => { state.cornerName = !state.cornerName; if (isTauri) setCfg('cornername', state.cornerName); persist(); render(); };
 $('#datesToggle').onclick = () => { state.showDates = !state.showDates; if (isTauri) setCfg('showdates', state.showDates); persist(); render(); };
 $('#touchToggle').onclick = () => { state.touchBar = !state.touchBar; if (isTauri) setCfg('touchbar', state.touchBar); persist(); render(); };
 $('#calToggle').onclick = () => { state.calendar = !state.calendar; persist(); render(); };
