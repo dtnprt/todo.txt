@@ -1,0 +1,43 @@
+/* Comic - colourful comic-book look, Comic Sans MS (system font, no embedded font). */
+:root {
+  --bg: #ffe14d;
+  --panel: #fffdf2;
+  --hover: #ffd0e6;
+  --line: #1b1b2f;
+  --text: #1b1b2f;
+  --muted: #5b5b86;
+  --accent: #ff2e63;
+  --accent-text: #ffffff;
+  --danger: #e6194b;
+  --warn: #ff7a00;
+  --ok: #1fae4b;
+  --pA: #e6194b;
+  --pB: #ff7a00;
+  --pC: #2e6bff;
+  --pD: #1fae4b;
+  --pX: #8a3ffc;
+  color-scheme: light;
+  --font: 'Comic Sans MS', 'Comic Sans', 'Comic Neue', 'Chalkboard SE', cursive;
+  --font-size: 15px;
+  /* halftone dots + colourful burst behind everything */
+  --bg-image: radial-gradient(circle at 15% 10%, rgba(255,46,99,.35) 0 18%, transparent 19%),
+              radial-gradient(circle at 90% 85%, rgba(46,107,255,.35) 0 20%, transparent 21%),
+              radial-gradient(rgba(27,27,47,.18) 1.5px, transparent 1.8px);
+}
+body { background-size: auto, auto, 10px 10px; }
+
+/* thick black outlines + hard offset shadows, like comic panels */
+.tasks, .topbar, .status, .composer-box, .help-box, .dd-menu, .ac {
+  border: 3px solid #1b1b2f;
+  box-shadow: 5px 5px 0 #1b1b2f;
+}
+.tasks { border-radius: 10px; }
+.topbar { background: linear-gradient(90deg, #ff2e63, #ff7a00 35%, #ffe14d 60%, #1fd1f9); }
+.topbar, .topbar .title { color: #1b1b2f; font-weight: bold; }
+.status { background: #1fd1f9; color: #1b1b2f; }
+.composer-box { border-radius: 12px; background: #fff; }
+.dd-menu, .ac { background: #fffdf2; border-radius: 10px; }
+.help-box { border-radius: 14px; background: color-mix(in srgb, #fffdf2 94%, transparent); }
+button { border-radius: 8px; font-family: inherit; }
+button:hover { background: #ffd0e6; }
+.tasks > * { border-bottom: 2px dashed rgba(27,27,47,.35); }
