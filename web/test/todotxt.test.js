@@ -114,3 +114,9 @@ test('fixPriorityCase / noteName / slugify', () => {
   assert.equal(T.noteName(T.parse('a note:../x')), null);
   assert.equal(T.slugify('Call Mom +Family @phone due:2024-01-01'), 'call-mom');
 });
+
+test('noteNames / nextNoteName', () => {
+  assert.deepEqual(T.noteNames(T.parse('a note:Note-A note:b.c note:../x')), ['Note-A', 'b.c']);
+  assert.equal(T.nextNoteName([]), 'Note-A');
+  assert.equal(T.nextNoteName(['Note-A', 'note-b']), 'Note-C');
+});

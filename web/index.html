@@ -21,6 +21,7 @@
         <button id="new" role="menuitem"><i class="fa-solid fa-file" aria-hidden="true"></i> New</button>
         <button id="open" role="menuitem"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Open…</button>
         <button id="openFolder" role="menuitem"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i> Open folder…</button>
+        <button id="openDav" role="menuitem" style="display:none"><i class="fa-solid fa-cloud" aria-hidden="true"></i> WebDAV…</button>
         <button id="refresh" role="menuitem"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Reload from disk <kbd>Ctrl+R</kbd></button>
         <button id="save" role="menuitem"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save <kbd>Ctrl+S</kbd></button>
         <button id="saveAs" role="menuitem"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Save as…</button>
@@ -76,6 +77,7 @@
           </div>
           <div id="ac" class="ac" hidden></div>
         </div>
+        <div id="touchBar" class="touchbar" role="toolbar" aria-label="Task helpers" hidden></div>
       </form>
     </main>
   </div>
@@ -88,6 +90,7 @@
       <div class="set-tabs" role="tablist">
         <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
         <button type="button" role="tab" data-tab="window" aria-selected="false">Window</button>
+        <button type="button" role="tab" data-tab="webdav" aria-selected="false" id="davTab" style="display:none">WebDAV</button>
         <button type="button" role="tab" data-tab="theme" aria-selected="false">Theme</button>
       </div>
       <div class="set-pane" data-pane="general">
@@ -95,6 +98,7 @@
         <button id="showDone" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show completed <kbd>F3</kbd></button>
         <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show sidebar <kbd>F4</kbd></button>
         <button id="calToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show Calendar <kbd>F6</kbd></button>
+        <button id="touchToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show touch toolbar (priority, project, due, note…)</button>
         <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show status bar</button>
         <button id="lineNoToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Line numbers</button>
         <button id="gitInit" class="git-item" role="menuitem" style="display:none"><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Initialize git here…</button>
@@ -104,6 +108,7 @@
         <button id="onTopToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Always on top <kbd>F9</kbd></button>
         <button id="minimalToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Minimal mode <kbd>F11</kbd></button>
       </div>
+      <div class="set-pane" data-pane="webdav" hidden></div>
       <div class="set-pane" data-pane="theme" hidden>
         <div id="themeMenu" role="menu"></div>
       </div>

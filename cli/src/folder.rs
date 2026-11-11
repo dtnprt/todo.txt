@@ -101,9 +101,19 @@ pub fn valid_note_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
-/// The `note:NAME` of a task line, if valid.
-pub fn note_name(tags: &std::collections::BTreeMap<String, String>) -> Option<String> {
-    tags.get("note").filter(|n| valid_note_name(n)).cloned()
+/// All `note:NAME` names of a task, in order (a task can have several notes).
+pub fn note_names(t: &crate::todotxt::Task) -> Vec<String> {
+    t.text
+        .split_whitespace()
+        .filter_map(|w| w.strip_prefix("note:"))
+        .filter(|n| valid_note_name(n))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The first `note:NAME` of a task, if any.
+pub fn note_name(t: &crate::todotxt::Task) -> Option<String> {
+    note_names(t).into_iter().next()
 }
 
 /// File-name-safe short name from a task description (projects, contexts and key:value words dropped).
@@ -141,20 +151,23 @@ pub fn slugify(text: &str) -> String {
     if s.is_empty() { "note".into() } else { s }
 }
 
-/// `base`, `base-2`, ... : the first name that no line uses and that has no note file yet.
-pub fn unique_note_name(base: &str, lines: &[String], folder: Option<&Path>) -> String {
+/// `Note-A`, `Note-B`, ...: the first name that no line uses and that has no note file yet.
+pub fn next_note_name(lines: &[String], folder: Option<&Path>) -> String {
     let used: HashSet<String> = lines
         .iter()
-        .filter_map(|l| note_name(&crate::todotxt::parse(l).tags))
+        .flat_map(|l| note_names(&crate::todotxt::parse(l)))
+        .map(|n| n.to_lowercase())
         .collect();
-    let mut n = 1;
-    loop {
-        let cand = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
-        if !used.contains(&cand) && !note_file(folder, &cand).exists() {
+    for n in 0.. {
+        let cand = match n {
+            0..=25 => format!("Note-{}", (b'A' + n as u8) as char),
+            _ => format!("Note-{}", n + 1),
+        };
+        if !used.contains(&cand.to_lowercase()) && !note_file(folder, &cand).exists() {
             return cand;
         }
-        n += 1;
     }
+    unreachable!()
 }
 
 /// Create the (empty) note file and its directory if needed.
@@ -169,16 +182,74 @@ pub fn ensure_note_file(folder: Option<&Path>, name: &str) -> std::io::Result<Pa
     Ok(p)
 }
 
-/// Delete the note file of a removed task, unless another line still uses the name.
-pub fn remove_note(folder: Option<&Path>, removed: &str, remaining: &[String]) {
-    let Some(name) = note_name(&crate::todotxt::parse(removed).tags) else { return };
-    if remaining.iter().any(|l| note_name(&crate::todotxt::parse(l).tags).as_deref() == Some(name.as_str())) {
-        return;
+/// A note file ready for the editor. For a todo file on a WebDAV server the note lives in `notes/NAME.txt` next to
+/// it on the server: it is downloaded to a temporary local file and uploaded again by `finish_note`.
+pub struct NoteFile {
+    pub local: PathBuf,
+    remote: Option<(crate::webdav::Server, String)>,
+}
+
+pub fn prepare_note(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::Result<NoteFile> {
+    let t = todo.to_string_lossy().into_owned();
+    if !crate::webdav::is_remote(&t) {
+        return Ok(NoteFile { local: ensure_note_file(folder, name)?, remote: None });
     }
-    let p = note_file(folder, &name);
-    if fs::remove_file(&p).is_ok() {
-        if let Some(dir) = p.parent() {
-            let _ = fs::remove_dir(dir); // only if empty
+    let server = crate::store::server_of(todo)?;
+    let url = crate::webdav::join(&format!("{}notes/", crate::webdav::parent(&t)), &format!("{name}.txt"));
+    let text = match crate::webdav::get(&server, &url) {
+        Ok((text, _)) => text,
+        Err(crate::webdav::Error::NotFound) => String::new(),
+        Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+    };
+    let dir = std::env::temp_dir().join("todo-notes");
+    fs::create_dir_all(&dir)?;
+    let local = dir.join(format!("{name}.txt"));
+    fs::write(&local, text)?;
+    Ok(NoteFile { local, remote: Some((server, url)) })
+}
+
+/// After editing: upload a remote note (an empty one is deleted), remove the temporary file or an empty local note.
+pub fn finish_note(n: &NoteFile) -> std::io::Result<()> {
+    let text = fs::read_to_string(&n.local).unwrap_or_default();
+    let err = |e: crate::webdav::Error| std::io::Error::new(std::io::ErrorKind::Other, e.to_string());
+    match &n.remote {
+        Some((server, url)) => {
+            if text.trim().is_empty() {
+                crate::webdav::delete(server, url).map_err(err)?;
+            } else {
+                crate::webdav::put(server, url, &text, None).map_err(err)?;
+            }
+            let _ = fs::remove_file(&n.local);
+        }
+        None => {
+            if text.is_empty() {
+                let _ = fs::remove_file(&n.local); // an empty note file is not worth keeping
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Delete the note files of a removed task, unless another line still uses the name.
+pub fn remove_note(todo: &Path, folder: Option<&Path>, removed: &str, remaining: &[String]) {
+    let remote = crate::webdav::is_remote(&todo.to_string_lossy());
+    let still: HashSet<String> = remaining.iter().flat_map(|l| note_names(&crate::todotxt::parse(l))).collect();
+    for name in note_names(&crate::todotxt::parse(removed)) {
+        if still.contains(&name) {
+            continue;
+        }
+        if remote {
+            if let Ok(server) = crate::store::server_of(todo) {
+                let t = todo.to_string_lossy();
+                let _ = crate::webdav::delete(&server, &crate::webdav::join(&format!("{}notes/", crate::webdav::parent(&t)), &format!("{name}.txt")));
+            }
+            continue;
+        }
+        let p = note_file(folder, &name);
+        if fs::remove_file(&p).is_ok() {
+            if let Some(dir) = p.parent() {
+                let _ = fs::remove_dir(dir); // only if empty
+            }
         }
     }
 }
@@ -235,5 +306,14 @@ mod tests {
         assert!(valid_note_name("my-note.v2"));
         assert!(!valid_note_name("../x"));
         assert!(!valid_note_name(".hidden"));
+    }
+
+    #[test]
+    fn several_notes_per_task() {
+        let t = crate::todotxt::parse("(A) call mom note:Note-A note:b.c note:../x");
+        assert_eq!(note_names(&t), vec!["Note-A", "b.c"]);
+        assert_eq!(note_name(&t).as_deref(), Some("Note-A"));
+        let lines = vec!["x note:Note-A".to_string(), "y note:note-b".to_string()];
+        assert_eq!(next_note_name(&lines, Some(Path::new("."))), "Note-C");
     }
 }

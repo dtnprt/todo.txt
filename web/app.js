@@ -1,6 +1,7 @@
 import * as T from './todotxt.js';
 import { createComposer, attachHighlight, attachNoteHighlight, attachNoteTrigger, deleteWord, checkpoint, wordAt, dateAssist, replaceWordAt } from './composer.js';
 import { buildCalendar, parseIsoDate } from './calendar.js';
+import { createWebdav, isRemote, serverFor, davParent, davJoin, davName } from './webdav.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE_KEY = 'todotxt.v1';
@@ -56,6 +57,7 @@ const state = {
   calendar: true,
   minimal: false,
   statusBar: true,
+  touchBar: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,   // helper bar under the input (touch screens); Settings -> General
   onTop: false,         // desktop only (todo.cfg `ontop=`)
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
   autoSave: false,     // desktop only; stored in todo.cfg
@@ -72,7 +74,7 @@ function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       lines: state.lines, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
-      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, theme: state.theme,
+      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
@@ -93,6 +95,7 @@ function restore() {
     state.calendar = s.calendar !== false;
     state.minimal = !!s.minimal;
     state.statusBar = s.statusBar !== false;
+    if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     state.theme = THEMES.includes(s.theme) || (isTauri && typeof s.theme === 'string' && s.theme.startsWith('user:')) ? s.theme : '';
   } catch { /* corrupted: start empty */ }
 }
@@ -126,8 +129,37 @@ const removeLine = (i) => {
 
 // Desktop: last known content of state.path on disk, used to detect external changes.
 let diskText = null;
+// WebDAV: ETag of the version read last (a save is refused if the file changed on the server meanwhile).
+let davEtag = null;
+let davCheckedAt = 0;
+let davServers = [];   // `USER@URL` entries (todo.cfg `webdav=`)
 
-function loadText(text, name, handle = null, path = null) {
+const davEntry = (url) => serverFor(davServers, url)?.entry;
+/** Text of a local or WebDAV file: {text, etag, missing}. */
+async function readAny(p) {
+  if (isRemote(p)) {
+    const entry = davEntry(p);
+    if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
+    return invoke('webdav_get', { entry, url: p });
+  }
+  return { text: await tauri.fs.readTextFile(p), etag: null, missing: false };
+}
+/** Write a local or WebDAV file; for WebDAV the new ETag is remembered. */
+async function writeAny(p, text) {
+  if (!isRemote(p)) return tauri.fs.writeTextFile(p, text);
+  const entry = davEntry(p);
+  if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
+  try {
+    davEtag = await invoke('webdav_put', { entry, url: p, text, etag: davEtag });
+  } catch (e) {
+    if (!String(e).startsWith('conflict:')) throw e;
+    if (!confirm('The file was changed on the server meanwhile.\nOverwrite it with your version? (Cancel keeps the server version; use File → Reload from disk to load it.)')) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
+    davEtag = await invoke('webdav_put', { entry, url: p, text, etag: null });
+  }
+}
+
+function loadText(text, name, handle = null, path = null, etag = null) {
+  davEtag = etag;
   state.lines = T.parseFile(text);
   state.undo = [];
   state.fileName = name;
@@ -391,11 +423,12 @@ async function save({ as = false } = {}) {
         if (!p) return;
         state.path = p;
         state.fileName = baseName(p);
+        davEtag = null;
         rememberFile(p);
       }
-      await tauri.fs.writeTextFile(p, text);
+      await writeAny(p, text);
       diskText = text;
-      gitChanged(baseName(p));
+      if (!isRemote(p)) gitChanged(baseName(p));
     } else if (hasFSA) {
       if (as || !state.handle) {
         state.handle = await window.showSaveFilePicker({
@@ -420,8 +453,26 @@ async function save({ as = false } = {}) {
 
 // Reload the open file when another program changed it (desktop: polled), or on demand (Refresh button).
 let checking = false;
+let manualCheck = false;
 async function readCurrent() {
-  if (isTauri && state.path) return tauri.fs.readTextFile(state.path);
+  if (isTauri && state.path) {
+    if (isRemote(state.path)) {
+      // cheap check first: only fetch the text when the ETag changed
+      const entry = davEntry(state.path);
+      if (!entry) return null;
+      if (!manualCheck && davEtag) {
+        if (Date.now() - davCheckedAt < 8000) return null;
+        davCheckedAt = Date.now();
+        const tag = await invoke('webdav_etag', { entry, url: state.path });
+        if (tag === davEtag || tag === null) return null;
+      }
+      const r = await invoke('webdav_get', { entry, url: state.path });
+      if (r.missing) return null;
+      davEtag = r.etag;
+      return r.text;
+    }
+    return tauri.fs.readTextFile(state.path);
+  }
   if (state.handle) return (await state.handle.getFile()).text();
   return null;
 }
@@ -430,6 +481,7 @@ async function checkExternalChange(manual = false) {
   if (checking || (!manual && state.editing !== null)) return;
   if (!state.path && !state.handle) { if (manual) alert('No file is open.'); return; }
   checking = true;
+  manualCheck = manual;
   try {
     const text = await readCurrent();
     if (text === null) return;
@@ -489,11 +541,38 @@ function rememberFile(path) {
 }
 const saveFiles = () => setCfg('files', JSON.stringify(state.files));
 
+// WebDAV (desktop): server list in todo.cfg (`webdav=["USER@URL"]`), file browser overlay, Settings pane (webdav.js)
+const dav = createWebdav({
+  invoke,
+  servers: () => davServers,
+  setServers: (list) => { davServers = list; setCfg('webdav', JSON.stringify(list)); },
+  currentUrl: () => (isRemote(state.path) ? state.path : null),
+  canSaveHere: () => true,
+  openUrl: async (url) => {
+    if (!confirmDiscard()) throw new Error('cancelled');
+    const r = await readAny(url);
+    leaveFolder();
+    loadText(r.text, davName(url), null, url, r.etag);
+    rememberFile(url);
+  },
+  saveAs: async (url) => {
+    leaveFolder();
+    state.path = url;
+    state.fileName = davName(url);
+    davEtag = null;
+    rememberFile(url);
+    await save();
+  },
+});
+
+const davFileName = (p) => (isRemote(p) ? davName(p) : baseName(p));
+
 async function switchFile(p) {
   if (p === state.path || !confirmDiscard()) return;
   try {
     leaveFolder();
-    loadText(await tauri.fs.readTextFile(p), baseName(p), null, p);
+    const r = await readAny(p);
+    loadText(r.text, davFileName(p), null, p, r.etag);
     rememberFile(p);
   } catch (e) {
     alert(`Could not open ${p}: ${e.message || e}`);
@@ -567,6 +646,7 @@ async function loadAutoSave() {
     state.frameless = flag('frameless');
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
     state.onTop = flag('ontop');
+    if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
     if (/^\s*statusbar\s*=/m.test(cfg)) state.statusBar = flag('statusbar');   // shared with the terminal app
   } catch { /* no config yet: off */ }
   render();
@@ -583,6 +663,8 @@ async function openLastFile() {
       const cfg = await tauri.fs.readTextFile(await cfgPath());
       const m = cfg.match(/^\s*file\s*=\s*(.+?)\s*$/m);
       if (m) target = m[1];
+      const wm = cfg.match(/^\s*webdav\s*=\s*(.+?)\s*$/m);
+      if (wm) { try { const a = JSON.parse(wm[1]); if (Array.isArray(a)) davServers = a.filter((x) => typeof x === 'string' && x); } catch { /* ignore */ } }
       const dm = cfg.match(/^\s*folder\s*=\s*(.+?)\s*$/m);
       if (dm) state.folder = dm[1];
       const fm = cfg.match(/^\s*files\s*=\s*(.+?)\s*$/m);
@@ -606,10 +688,12 @@ async function openLastFile() {
     const candidates = [target, `${home}/todo.txt`].filter(Boolean);
     if (state.dirty && state.path) return; // keep unsaved work from the last session
     for (const p of candidates) {
-      let text;
-      try { text = await tauri.fs.readTextFile(p); } catch { continue; }
-      if (p === state.path && text === diskText) return;
-      loadText(text, baseName(p), null, p);
+      let r;
+      try { r = await readAny(p); } catch (e) { if (isRemote(p)) alert(`Could not open ${p}:
+${e.message || e}`); continue; }
+      if (r.missing) continue;
+      if (p === state.path && r.text === diskText) return;
+      loadText(r.text, davFileName(p), null, p, r.etag);
       return;
     }
   } catch (e) { console.warn('Could not open last file:', e); }
@@ -628,13 +712,18 @@ async function archiveDone() {
 }
 
 // ---------- note: longer text kept next to the todo file(s) ----------
-// Desktop: `<folder>/notes/NAME.txt` in folder mode, else `~/.todo.txt/notes/NAME.txt` (Rust commands).
-// Browser: `note/NAME.txt` in the opened folder, else localStorage.
+// A task can have several notes (`note:Note-A note:Note-B`); each is a file NAME.txt in the notes folder.
+// Desktop: `<folder>/notes/NAME.txt` in folder mode, else `~/.todo.txt/notes/NAME.txt` (Rust commands);
+// WebDAV file: `notes/NAME.txt` next to the todo file on the server.
+// Browser: `notes/NAME.txt` in the opened folder, else localStorage.
 
 const NOTE_KEY = 'todotxt.note.';
+const onDav = () => isTauri && isRemote(state.path);
+const noteUrl = (name) => davJoin(davParent(state.path) + 'notes/', `${name}.txt`);
 
 async function readNote(name) {
   try {
+    if (onDav()) return (await invoke('webdav_get', { entry: davEntry(state.path), url: noteUrl(name) })).text;
     if (isTauri) return await invoke('read_note', { folder: state.folder, name });
     if (state.dirHandle) return await (await (await (await state.dirHandle.getDirectoryHandle('notes')).getFileHandle(`${name}.txt`)).getFile()).text();
     return localStorage.getItem(NOTE_KEY + name) || '';
@@ -642,6 +731,7 @@ async function readNote(name) {
 }
 
 async function writeNote(name, text) {
+  if (onDav()) return invoke('webdav_put', { entry: davEntry(state.path), url: noteUrl(name), text, etag: null });
   if (isTauri) return invoke('write_note', { folder: state.folder, name, text });
   if (state.dirHandle) {
     const dir = await state.dirHandle.getDirectoryHandle('notes', { create: true });
@@ -653,100 +743,159 @@ async function writeNote(name, text) {
   localStorage.setItem(NOTE_KEY + name, text);
 }
 
-/** Delete the note file of a removed task (unless another task still uses the name). */
-async function deleteNoteOf(raw) {
-  const name = T.noteName(T.parse(raw));
-  if (!name || state.lines.some((l) => T.noteName(T.parse(l)) === name)) return;
+async function deleteNoteFile(name) {
   try {
-    if (isTauri) await invoke('delete_note', { folder: state.folder, name });
+    if (onDav()) await invoke('webdav_delete', { entry: davEntry(state.path), url: noteUrl(name) });
+    else if (isTauri) await invoke('delete_note', { folder: state.folder, name });
     else if (state.dirHandle) await (await state.dirHandle.getDirectoryHandle('notes')).removeEntry(`${name}.txt`);
     else localStorage.removeItem(NOTE_KEY + name);
     gitChanged(`${name}.txt`);
   } catch { /* no note file */ }
 }
 
-async function uniqueNoteName(base) {
-  const used = new Set(state.lines.map((l) => T.parse(l).tags.note).filter(Boolean));
-  for (let n = 1; ; n++) {
-    const cand = n === 1 ? base : `${base}-${n}`;
-    if (!used.has(cand) && !(await readNote(cand))) return cand;
-  }
+/** Delete the note files of a removed task (unless another task still uses the name). */
+async function deleteNoteOf(raw) {
+  const still = new Set(state.lines.flatMap((l) => T.noteNames(T.parse(l))));
+  for (const name of T.noteNames(T.parse(raw))) if (!still.has(name)) await deleteNoteFile(name);
 }
 
-/** Overlay editor for a note (same box as Settings). `onSave(text)` runs on save; `onClose()` after it closes either way. */
-function noteDialog({ title, text, onSave, onClose }) {
+const noteNameOk = (n) => /^[\w.-]+$/.test(n) && !n.startsWith('.');
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const allNoteNames = () => state.lines.flatMap((l) => T.noteNames(T.parse(l)));
+
+/**
+ * Overlay editor for a note (same box as Settings): a name field (default `Note-A`, `Note-B`, ...) and, when the
+ * entry has notes, a dropdown of all of them (choosing one saves this note and opens that one).
+ *   names: the entry's notes · taken(n): the name belongs to something else
+ *   onSave(name, text) runs on save · onPick(name|null) after the dialog closed because another note (null = new) was chosen
+ *   onClose(savedName|null) after it closes either way.
+ */
+function noteDialog({ name, names, isNew, text, taken, onSave, onPick, onClose }) {
   if (document.getElementById('noteDlg')) return;
   const ta = el('textarea', { className: 'note-text', value: text, spellcheck: false });
   const field = attachNoteHighlight(ta);
-  const close = () => { ov.remove(); if (onClose) onClose(); };
-  const save = async () => {
-    try { await onSave(ta.value); close(); } catch (e) { alert(`Could not save note: ${e.message || e}`); }
+  const nameIn = el('input', { type: 'text', className: 'note-name', value: name, spellcheck: false, title: 'Note name (the file is NAME.txt)', 'aria-label': 'Note name' });
+  const err = el('small', { className: 'note-err' });
+  let savedName = null;
+  const close = () => { ov.remove(); if (onClose) onClose(savedName); };
+  const cancelClose = () => { savedName = null; close(); };
+  /** Validate and save; true when the dialog may close. */
+  const commitNote = async () => {
+    const n = nameIn.value.trim();
+    if (!noteNameOk(n)) { err.textContent = 'Name: letters, digits, _ - . only'; nameIn.focus(); return false; }
+    if (taken(n)) { err.textContent = `"${n}" is already used by another note`; nameIn.focus(); return false; }
+    if (isNew && !ta.value.trim()) return true;   // nothing typed: no note is created
+    try { await onSave(n, ta.value); savedName = n; return true; } catch (e) { alert(`Could not save note: ${e.message || e}`); return false; }
   };
+  const save = async () => { if (await commitNote()) close(); };
+  const NEW = '\u0000new';
+  let pick = null;
+  if (names.length) {
+    pick = el('select', { className: 'note-pick', title: 'All notes of this entry', 'aria-label': 'Notes of this entry' },
+      ...names.map((n) => el('option', { value: n, textContent: n, selected: n === name && !isNew })),
+      el('option', { value: NEW, textContent: '＋ New note', selected: isNew }));
+    pick.onchange = async () => {
+      const v = pick.value;
+      if ((v === NEW && isNew) || (v === name && !isNew)) return;
+      if (await commitNote()) { close(); if (onPick) onPick(v === NEW ? null : v); }
+      else pick.value = isNew ? NEW : name;
+    };
+  }
   const ok = el('button', { className: 'primary', textContent: 'Save', onclick: save });
-  const cancel = el('button', { textContent: 'Cancel', onclick: close });
+  const cancel = el('button', { textContent: 'Cancel', onclick: cancelClose });
   const ov = el('div', { id: 'noteDlg', className: 'help' },
     el('div', { className: 'help-box set-box note-box', role: 'dialog', 'aria-label': 'Note' },
-      el('div', { className: 'set-head' }, el('h2', {}, el('i', { className: 'fa-solid fa-note-sticky' }), ` ${title}`),
-        el('button', { type: 'button', className: 'icon', title: 'Close (Esc)', 'aria-label': 'Close', onclick: close }, el('i', { className: 'fa-solid fa-xmark' }))),
+      el('div', { className: 'set-head note-head' }, el('i', { className: 'fa-solid fa-note-sticky' }), nameIn, ...(pick ? [pick] : []), err, el('span', { className: 'spacer' }),
+        el('button', { type: 'button', className: 'icon', title: 'Close (Esc)', 'aria-label': 'Close', onclick: cancelClose }, el('i', { className: 'fa-solid fa-xmark' }))),
       field.el,
       el('div', { className: 'note-buttons' }, el('small', {}, 'Ctrl+Enter saves · Esc cancels'), el('span', { className: 'spacer' }), cancel, ok)));
   ov.addEventListener('keydown', (e) => {
     e.stopPropagation();
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape') cancelClose();
     else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save();
   });
-  ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) cancelClose(); });
   document.body.append(ov);
   ta.focus();
 }
 
-/** Edit the note text of line `i`; a task without `note:` gets one (named after its text). */
-async function editNote(i) {
+/**
+ * Edit a note of line `i`. `which`: a note name; null = a new note (named Note-A, Note-B, ...); undefined = the first
+ * note, or a new one if the task has none.
+ */
+async function editNote(i, which) {
   if (document.getElementById('noteDlg')) return;
-  let name = T.noteName(T.parse(state.lines[i]));
-  if (!name) {
-    name = await uniqueNoteName(T.slugify(T.parse(state.lines[i]).text));
-    replaceLine(i, `${state.lines[i]} note:${name}`);
-  }
+  const names = T.noteNames(T.parse(state.lines[i]));
+  let name = which === undefined ? names[0] : which;
+  const isNew = !name || !names.includes(name);
+  if (isNew) name = T.nextNoteName(allNoteNames());
+  const others = new Set(state.lines.flatMap((l, j) => (j === i ? [] : T.noteNames(T.parse(l)))).map((n) => n.toLowerCase()));
   noteDialog({
-    title: `${name}.txt`,
-    text: await readNote(name),
-    onSave: async (text) => { await writeNote(name, text); gitChanged(`${name}.txt`); },
+    name, names, isNew,
+    text: isNew ? '' : await readNote(name),
+    taken: (n) => (isNew || n.toLowerCase() !== name.toLowerCase()) && (others.has(n.toLowerCase()) || names.some((x) => x !== name && x.toLowerCase() === n.toLowerCase())),
+    onSave: async (n, body) => {
+      await writeNote(n, body);
+      if (isNew) replaceLine(i, `${state.lines[i]} note:${n}`);
+      else if (n !== name) {
+        replaceLine(i, state.lines[i].replace(new RegExp(`(^|\\s)note:${escRe(name)}(?=\\s|$)`), `$1note:${n}`));
+        if (!allNoteNames().includes(name)) await deleteNoteFile(name);
+      }
+      gitChanged(`${n}.txt`);
+    },
+    onPick: (v) => setTimeout(() => editNote(i, v), 0),
   });
 }
 
 /**
  * Typing `note:` in the add bar / edit field opens the note editor. On save the word becomes `note:NAME`
  * (the note file is written right away); on cancel or an empty note the word is removed. Typing continues after.
+ * Notes already in the input are listed in the dropdown and can be edited too.
  */
 function noteForInput(input) {
   if (document.getElementById('noteDlg')) return;
   const { start, end } = wordAt(input);
-  const text = (input.value.slice(0, start) + input.value.slice(end)).trim();
-  const put = (word) => {
+  const put = (r, word) => {
     checkpoint(input);
     const v = input.value;
-    const before = v.slice(0, start);
-    const after = v.slice(end).replace(/^\s+/, '');
-    const ins = word ? word + ' ' : '';
+    const before = v.slice(0, r.start);
+    const after = v.slice(r.end).replace(/^\s+/, '');
+    const sep = word && before && !/\s$/.test(before) ? ' ' : '';
+    const ins = word ? `${sep}${word} ` : '';
     input.value = before + ins + after;
     const caret = before.length + ins.length;
     input.setSelectionRange(caret, caret);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   };
-  let saved = false;
-  noteDialog({
-    title: 'New note',
-    text: '',
-    onSave: async (body) => {
-      if (!body.trim()) return;
-      const name = await uniqueNoteName(T.slugify(T.parse(text).text));
-      await writeNote(name, body);
-      gitChanged(`${name}.txt`);
-      saved = name;
-    },
-    onClose: () => { put(saved ? `note:${saved}` : ''); input.focus(); },
-  });
+  const inputNames = (v) => v.split(/\s+/).map((w) => /^note:([\w.-]+)$/.exec(w)?.[1]).filter((n) => n && !n.startsWith('.'));
+  const wordRange = (n) => {
+    const m = new RegExp(`(^|\\s)note:${escRe(n)}(?=\\s|$)`).exec(input.value);
+    return m ? { start: m.index + m[1].length, end: m.index + m[0].length } : null;
+  };
+  const atEnd = () => ({ start: input.value.length, end: input.value.length });
+  /** target: {trigger: {start,end}} (the typed `note:`), {name} (a note word in the input) or {} (append a new one). */
+  const open = async (target) => {
+    const valueNow = target.trigger ? input.value.slice(0, target.trigger.start) + input.value.slice(target.trigger.end) : input.value;
+    const names = inputNames(valueNow);
+    const isNew = !target.name;
+    const name = isNew ? T.nextNoteName([...allNoteNames(), ...names]) : target.name;
+    const others = new Set(state.lines.flatMap((l, j) => (j === state.editing ? [] : T.noteNames(T.parse(l)))).map((n) => n.toLowerCase()));
+    noteDialog({
+      name, names, isNew,
+      text: isNew ? '' : await readNote(name),
+      taken: (n) => (isNew || n.toLowerCase() !== name.toLowerCase()) && (others.has(n.toLowerCase()) || names.some((x) => x !== name && x.toLowerCase() === n.toLowerCase())),
+      onSave: async (n, body) => { await writeNote(n, body); gitChanged(`${n}.txt`); },
+      onPick: (v) => setTimeout(() => open(v ? { name: v } : {}), 0),
+      onClose: (saved) => {
+        if (saved) {
+          const r = target.trigger || (target.name && wordRange(target.name)) || atEnd();
+          put(r, `note:${saved}`);
+        } else if (target.trigger) put(target.trigger, '');
+        input.focus();
+      },
+    });
+  };
+  open({ trigger: { start, end } });
 }
 
 // ---------- derived data ----------
@@ -857,8 +1006,8 @@ function renderText(t, i) {
       frag.append(el('a', { href: part, textContent: part, target: '_blank', rel: 'noopener noreferrer' }));
     } else {
       const m = /^([^\s:]+):([^\s:]+)$/.exec(part);
-      if (m && m[1] === 'note' && T.noteName(t)) {
-        frag.append(el('button', { className: 'chip note', textContent: part, title: 'Open note', onclick: () => editNote(i) }));
+      if (m && m[1] === 'note' && T.noteNames(t).includes(m[2])) {
+        frag.append(el('button', { className: 'chip note', textContent: part, title: 'Open note', onclick: () => editNote(i, m[2]) }));
       } else if (m && !m[2].startsWith('//')) {
         let cls = 'meta';
         if (m[1] === 'due' && !t.done) cls += ' ' + (T.dueStatus(t) || '');
@@ -965,13 +1114,29 @@ function renderTask({ i, t }, idx) {
     };
   }
 
-  const hasNote = !!T.noteName(t);
+  const noteList = T.noteNames(t);
+  const hasNote = noteList.length > 0;
+  let noteCtl;
+  if (noteList.length > 1) {
+    // several notes: the button opens a dropdown of all of them
+    const nb = el('button', { type: 'button', className: 'dd-btn note-btn on', title: `${noteList.length} notes`, 'aria-label': 'Notes' },
+      el('i', { className: 'fa-solid fa-note-sticky' }), el('small', { className: 'note-count', textContent: String(noteList.length) }));
+    nb.setAttribute('aria-haspopup', 'true');
+    nb.setAttribute('aria-expanded', 'false');
+    const nm = el('div', { className: 'dd-menu note-menu', hidden: true, role: 'menu' },
+      ...noteList.map((n) => el('button', { type: 'button', role: 'menuitem', onclick: () => editNote(i, n) }, el('i', { className: 'fa-solid fa-note-sticky' }), ` ${n}`)),
+      el('hr'), el('button', { type: 'button', role: 'menuitem', onclick: () => editNote(i, null) }, el('i', { className: 'fa-solid fa-plus' }), ' New note'));
+    noteCtl = el('div', { className: 'dd note-dd' }, nb, nm);
+    wireDropdown(noteCtl);
+  } else {
+    noteCtl = el('button', { className: 'note-btn' + (hasNote ? ' on' : ''), title: hasNote ? 'Note' : 'Add note', onclick: () => editNote(i) },
+      el('i', { className: 'fa-solid fa-note-sticky' }));
+  }
   const actions = el('div', { className: 'actions' + (hasNote ? ' has-note' : '') },
-    el('button', { className: 'note-btn' + (hasNote ? ' on' : ''), title: hasNote ? 'Note' : 'Add note', onclick: () => editNote(i) },
-      el('i', { className: 'fa-solid fa-note-sticky' })),
+    noteCtl,
     el('button', { title: 'Edit', onclick: () => { state.editing = i; render(); } }, el('i', { className: 'fa-solid fa-pen' })),
     el('button', { className: 'del', title: 'Delete', onclick: () => removeLine(i) }, el('i', { className: 'fa-solid fa-xmark' })));
-  actions.children[0].setAttribute('aria-label', 'Note');
+  if (noteList.length <= 1) actions.children[0].setAttribute('aria-label', 'Note');
   actions.children[1].setAttribute('aria-label', 'Edit');
   actions.lastChild.setAttribute('aria-label', 'Delete');
 
@@ -991,11 +1156,15 @@ function render() {
   $('#calToggle').setAttribute('aria-checked', state.calendar);
   $('#minimalToggle').setAttribute('aria-checked', state.minimal);
   $('#statusToggle').setAttribute('aria-checked', state.statusBar);
+  $('#touchToggle').setAttribute('aria-checked', state.touchBar);
+  $('#touchBar').hidden = !state.touchBar || state.view === 'text';
   document.body.classList.toggle('minimal', state.minimal);
   document.body.classList.toggle('nostatus', !state.statusBar);
   if (!state.minimal) document.body.classList.remove('show-bar');
   applyTheme();
   $('#openFolder').style.display = isTauri || hasDirPicker ? '' : 'none';
+  $('#openDav').style.display = isTauri ? '' : 'none';
+  $('#davTab').style.display = isTauri ? '' : 'none';
   renderGit();
   $('#autoSaveToggle').style.display = isTauri ? '' : 'none';
   $('#autoSaveToggle').setAttribute('aria-checked', state.autoSave);
@@ -1263,6 +1432,60 @@ const composer = createComposer({
   onSearch: (q) => { state.filter.q = q; render(); },
 });
 
+// ---------- touch toolbar: buttons under the input that edit the text being typed (priority, +project, @context, due, note) ----------
+{
+  const input = $('#addInput');
+  const bar = $('#touchBar');
+  /** Insert `text` at the caret (a space before it if needed), keep the focus and let the composer react (popups). */
+  const insert = (text) => {
+    input.focus();
+    checkpoint(input);
+    const v = input.value;
+    const a = input.selectionStart ?? v.length;
+    const b = input.selectionEnd ?? a;
+    const sep = a > 0 && !/\s$/.test(v.slice(0, a)) ? ' ' : '';
+    input.value = v.slice(0, a) + sep + text + v.slice(b);
+    const caret = a + sep.length + text.length;
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  /** Set (letter) or remove (null) the `(X) ` priority at the start of the input. */
+  const setPrio = (L) => {
+    if (composer.mode !== 'add') composer.setMode('add');
+    input.focus();
+    checkpoint(input);
+    const rest = input.value.replace(/^\([A-Za-z]?\)?\s*/, '');
+    const pre = L ? `(${L}) ` : '';
+    const caret = Math.max(0, (input.selectionStart ?? 0) - (input.value.length - rest.length)) + pre.length;
+    input.value = pre + rest;
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return T.isoDate(d); };
+  const btn = (label, title, onclick, cls = '') => {
+    const b = el('button', { type: 'button', className: `tb ${cls}`.trim(), title, onclick });
+    b.append(...(Array.isArray(label) ? label : [label]));
+    b.setAttribute('aria-label', title);
+    return b;
+  };
+  const ic = (n) => el('i', { className: `fa-solid fa-${n}` });
+  bar.append(
+    el('span', { className: 'tb-group', role: 'group', 'aria-label': 'Priority' },
+      ...['A', 'B', 'C', 'D'].map((L) => btn(L, `Priority ${L}`, () => setPrio(L), `tb-p tk-p${L}`)),
+      btn(ic('ban'), 'No priority', () => setPrio(null), 'tb-p')),
+    btn([ic('folder-tree'), ' +'], 'Project (+name)', () => insert('+'), 'tb-w'),
+    btn([ic('at'), ''], 'Context (@name)', () => insert('@'), 'tb-w'),
+    btn([ic('calendar-day'), ' due'], 'Due date (opens the calendar)', () => insert('due:'), 'tb-w'),
+    btn('Today', 'due:today', () => insert(`due:${day(0)} `)),
+    btn('Tomorrow', 'due:tomorrow', () => insert(`due:${day(1)} `)),
+    btn('+1 week', 'due in a week', () => insert(`due:${day(7)} `)),
+    btn([ic('note-sticky'), ' note'], 'Add a note', () => { insert('note:'); noteForInput(input); }, 'tb-w'),
+    el('span', { className: 'spacer' }),
+    el('button', { type: 'submit', className: 'tb tb-add', title: 'Add task (Enter)', 'aria-label': 'Add task' }, ic('plus'), ' Add'));
+  // keep the focus (and the on-screen keyboard) in the input when tapping a button
+  bar.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+}
+
 function buildThemeMenu() {
   const menu = $('#themeMenu');
   menu.replaceChildren();
@@ -1298,6 +1521,7 @@ loadUserThemes();
 // Settings overlay (gear): tabs, scrolls when the window is small.
 const settingsEl = $('#settings');
 function showTab(name) {
+  if (name === 'webdav') dav.renderPane(settingsEl.querySelector('[data-pane=webdav]'));
   settingsEl.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   settingsEl.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== name; });
 }
@@ -1313,6 +1537,7 @@ $('#showDone').onclick = () => { state.showDone = !state.showDone; persist(); re
 $('#viewToggle').onclick = () => { state.view = state.view === 'list' ? 'text' : 'list'; render(); };
 $('#statusToggle').onclick = () => { state.statusBar = !state.statusBar; if (isTauri) setCfg('statusbar', state.statusBar); persist(); render(); };
 $('#minimalToggle').onclick = () => { state.minimal = !state.minimal; persist(); render(); };
+$('#touchToggle').onclick = () => { state.touchBar = !state.touchBar; if (isTauri) setCfg('touchbar', state.touchBar); persist(); render(); };
 $('#calToggle').onclick = () => { state.calendar = !state.calendar; persist(); render(); };
 $('#autoSaveToggle').onclick = () => {
   state.autoSave = !state.autoSave;
@@ -1424,6 +1649,7 @@ document.addEventListener('click', closeMenus);
 
 $('#undo').onclick = undo;
 $('#openFolder').onclick = openFolder;
+$('#openDav').onclick = () => dav.openBrowser();
 $('#open').onclick = openFile;
 $('#new').onclick = () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };
 $('#save').onclick = () => save();

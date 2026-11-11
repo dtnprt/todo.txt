@@ -16,6 +16,7 @@ mod input;
 mod list;
 mod ops;
 mod store;
+mod webdav;
 mod todotxt;
 mod tui;
 
@@ -119,7 +120,19 @@ struct Cli {
     #[arg(short = 'D', long, value_name = "NUMBER")]
     note: Option<usize>,
 
-    /// Use this todo.txt, or a whole FOLDER of *.txt files (and remember it)
+    /// WebDAV: add the server USER@URL and store its password in the OS keyring (asks for it; or set TODO_WEBDAV_PASSWORD)
+    #[arg(long, value_name = "USER@URL")]
+    webdav_login: Option<String>,
+
+    /// WebDAV: forget the server USER@URL (removes it and its password)
+    #[arg(long, value_name = "USER@URL")]
+    webdav_logout: Option<String>,
+
+    /// WebDAV: list the files and folders at URL (without URL: the first server)
+    #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
+    webdav_ls: Option<String>,
+
+    /// Use this todo.txt (a path, or a WebDAV URL https://...), or a whole FOLDER of *.txt files (and remember it)
     #[arg(short = 'f', long, value_name = "FILE|FOLDER")]
     file: Option<PathBuf>,
 
@@ -135,13 +148,59 @@ fn main() {
     }
 }
 
+/// `--webdav-login`, `--webdav-logout`, `--webdav-ls`.
+fn webdav_cmds(cli: &Cli, cfg: &mut Config) -> Result<(), Box<dyn Error>> {
+    if let Some(entry) = &cli.webdav_login {
+        let server = webdav::Server::parse(entry).ok_or("use USER@URL, e.g. alice@https://cloud.example.com/remote.php/dav/files/alice/")?;
+        let pass = match std::env::var("TODO_WEBDAV_PASSWORD") {
+            Ok(p) if !p.is_empty() => p,
+            _ => rpassword::prompt_password(format!("Password for {} : ", server.entry()))?,
+        };
+        webdav::cred::set(&server, &pass)?;
+        if let Err(e) = webdav::list(&server, &server.url) {
+            let _ = webdav::cred::delete(&server);
+            return Err(format!("login failed: {e}").into());
+        }
+        if !cfg.webdav.contains(&server.entry()) {
+            cfg.webdav.push(server.entry());
+            cfg.save()?;
+        }
+        println!("ok: {} (password stored in the keyring)", server.entry());
+    }
+    if let Some(entry) = &cli.webdav_logout {
+        let server = webdav::Server::parse(entry).ok_or("use USER@URL")?;
+        webdav::cred::delete(&server)?;
+        cfg.webdav.retain(|e| *e != server.entry());
+        cfg.save()?;
+        println!("removed {}", server.entry());
+    }
+    if let Some(url) = &cli.webdav_ls {
+        let url = if url.is_empty() {
+            cfg.webdav.first().and_then(|e| webdav::Server::parse(e)).map(|s| s.url).ok_or("no WebDAV server configured (todo --webdav-login USER@URL)")?
+        } else {
+            url.clone()
+        };
+        let server = webdav::server_for(&cfg.webdav, &url).ok_or("no WebDAV server configured for that URL")?;
+        for e in webdav::list(&server, &url).map_err(|e| e.to_string())? {
+            println!("{}{}", if e.is_dir { "[dir]  " } else { "       " }, e.url);
+        }
+    }
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     ops::enable_ansi();
     let mut cfg = Config::load();
 
+    // WebDAV server management (no todo file involved)
+    if cli.webdav_login.is_some() || cli.webdav_logout.is_some() || cli.webdav_ls.is_some() {
+        return webdav_cmds(&cli, &mut cfg);
+    }
+
     // Git: pull before anything is read (only with .todo-git.cfg: enabled, auto and pull on)
     let git_switches = cli.git_init || cli.sync || cli.git.is_some() || cli.git_auto.is_some() || !cli.git_set.is_empty();
     let early_dir = match &cli.file {
+        Some(f) if webdav::is_remote(&f.to_string_lossy()) => None,
         Some(f) => std::path::absolute(f).ok().filter(|p| p.is_dir()),
         None => cfg.folder.clone().filter(|d| d.is_dir()),
     };
@@ -177,6 +236,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     // folder mode: `-f FOLDER`, or `folder=` in the config; otherwise a single file
     let mut folder: Option<PathBuf> = None;
     let path = match &cli.file {
+        Some(f) if webdav::is_remote(&f.to_string_lossy()) => f.clone(),
         Some(f) => {
             let f = std::path::absolute(f)?;
             if f.is_dir() {
@@ -263,18 +323,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         let mut store = Store::load(&path)?;
         let i = store.index_of(n).ok_or_else(|| format!("no task at line {n}"))?;
         let t = todotxt::parse(&store.lines[i]);
-        let name = match folder::note_name(&t.tags) {
+        let name = match folder::note_name(&t) {
             Some(name) => name,
             None => {
-                let name = folder::unique_note_name(&folder::slugify(&t.text), &store.lines, folder.as_deref());
+                let name = folder::next_note_name(&store.lines, folder.as_deref());
                 store.lines[i] = format!("{} note:{name}", store.lines[i]);
                 store.save(&path)?;
                 println!("{n}: {}", store.lines[i]);
                 name
             }
         };
-        let file = folder::ensure_note_file(folder.as_deref(), &name)?;
-        folder::edit_in_editor(&file)?;
+        let file = folder::prepare_note(&path, folder.as_deref(), &name)?;
+        folder::edit_in_editor(&file.local)?;
+        folder::finish_note(&file)?;
         return Ok(());
     }
 
@@ -364,7 +425,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         let i = store.index_of(n).ok_or_else(|| format!("no task at line {n}"))?;
         let gone = store.lines.remove(i);
         store.save(&path)?;
-        folder::remove_note(folder.as_deref(), &gone, &store.lines);
+        folder::remove_note(&path, folder.as_deref(), &gone, &store.lines);
         println!("Deleted {n}: {gone}");
         return Ok(());
     }
@@ -473,6 +534,13 @@ fn print_info(cfg: &Config, path: &std::path::Path, folder: Option<&std::path::P
         None => println!("folder:     - (single file mode)"),
     }
     println!("file:       {}", path.display());
+    if cfg.webdav.is_empty() {
+        println!("webdav:     - (none; todo --webdav-login USER@URL)");
+    }
+    for e in &cfg.webdav {
+        let ok = webdav::Server::parse(e).is_some_and(|s| webdav::cred::exists(&s));
+        println!("webdav:     {e} ({})", if ok { "password stored" } else { "NO password" });
+    }
     match Store::load(path) {
         Ok(store) => {
             let tasks: Vec<_> = store.lines.iter().filter(|l| !l.trim().is_empty()).map(|l| todotxt::parse(l)).collect();

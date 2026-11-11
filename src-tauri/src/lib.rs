@@ -6,6 +6,10 @@
 #[path = "../../cli/src/git.rs"]
 mod git;
 
+// WebDAV storage + keyring credentials: the same code as the terminal app
+#[path = "../../cli/src/webdav.rs"]
+mod webdav;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -249,6 +253,116 @@ fn git_result() -> Option<String> {
     git::take_result()
 }
 
+// ---------------------------------------------------------------- WebDAV
+// `entry` is the server as configured (`USER@URL`, config key `webdav=`); the password only ever lives in the keyring.
+
+fn server(entry: &str) -> Result<webdav::Server, String> {
+    webdav::Server::parse(entry).ok_or_else(|| format!("invalid server '{entry}' (USER@URL)"))
+}
+
+/// Store the password in the keyring and check that the server accepts the login.
+#[tauri::command]
+async fn webdav_login(entry: String, password: String) -> Result<(), String> {
+    blocking(move || {
+        let s = server(&entry)?;
+        webdav::cred::set(&s, &password)?;
+        if let Err(e) = webdav::list(&s, &s.url) {
+            let _ = webdav::cred::delete(&s);
+            return Err(format!("login failed: {e}"));
+        }
+        Ok(())
+    })
+    .await?
+}
+
+#[tauri::command]
+async fn webdav_logout(entry: String) -> Result<(), String> {
+    blocking(move || webdav::cred::delete(&server(&entry)?)).await?
+}
+
+#[tauri::command]
+async fn webdav_has_password(entry: String) -> Result<bool, String> {
+    blocking(move || server(&entry).map(|s| webdav::cred::exists(&s))).await?
+}
+
+#[derive(serde::Serialize)]
+struct DavEntry {
+    name: String,
+    url: String,
+    is_dir: bool,
+    size: u64,
+}
+
+#[tauri::command]
+async fn webdav_list(entry: String, url: String) -> Result<Vec<DavEntry>, String> {
+    blocking(move || {
+        let s = server(&entry)?;
+        Ok::<_, String>(
+            webdav::list(&s, &url)?
+                .into_iter()
+                .map(|e| DavEntry { name: e.name, url: e.url, is_dir: e.is_dir, size: e.size })
+                .collect(),
+        )
+    })
+    .await?
+}
+
+#[derive(serde::Serialize)]
+struct DavFile {
+    text: String,
+    etag: Option<String>,
+    /// The file does not exist yet (it is created on the first save).
+    missing: bool,
+}
+
+#[tauri::command]
+async fn webdav_get(entry: String, url: String) -> Result<DavFile, String> {
+    blocking(move || {
+        let s = server(&entry)?;
+        match webdav::get(&s, &url) {
+            Ok((text, etag)) => Ok(DavFile { text, etag, missing: false }),
+            Err(webdav::Error::NotFound) => Ok(DavFile { text: String::new(), etag: None, missing: true }),
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await?
+}
+
+/// Write with `If-Match: etag`; the error text starts with `conflict:` when the file changed meanwhile.
+#[tauri::command]
+async fn webdav_put(entry: String, url: String, text: String, etag: Option<String>) -> Result<Option<String>, String> {
+    blocking(move || {
+        let s = server(&entry)?;
+        webdav::put(&s, &url, &text, etag.as_deref()).map_err(|e| match e {
+            webdav::Error::Conflict => format!("conflict: {e}"),
+            e => e.to_string(),
+        })
+    })
+    .await?
+}
+
+#[tauri::command]
+async fn webdav_etag(entry: String, url: String) -> Result<Option<String>, String> {
+    blocking(move || {
+        let s = server(&entry)?;
+        match webdav::etag(&s, &url) {
+            Err(webdav::Error::NotFound) => Ok(None),
+            r => r.map_err(|e| e.to_string()),
+        }
+    })
+    .await?
+}
+
+#[tauri::command]
+async fn webdav_mkcol(entry: String, url: String) -> Result<(), String> {
+    blocking(move || webdav::mkcol(&server(&entry)?, &url).map_err(|e| e.to_string())).await?
+}
+
+#[tauri::command]
+async fn webdav_delete(entry: String, url: String) -> Result<(), String> {
+    blocking(move || webdav::delete(&server(&entry)?, &url).map_err(|e| e.to_string())).await?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -268,7 +382,16 @@ pub fn run() {
             git_start,
             git_changed,
             git_sync,
-            git_result
+            git_result,
+            webdav_login,
+            webdav_logout,
+            webdav_has_password,
+            webdav_list,
+            webdav_get,
+            webdav_put,
+            webdav_etag,
+            webdav_mkcol,
+            webdav_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running the todo.txt application");

@@ -18,3 +18,11 @@ tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 git2 = "0.21"
 auth-git2 = "0.6"
+ureq = "2"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "vendored"] }

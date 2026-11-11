@@ -16,6 +16,15 @@ regex = "1"
 unicode-width = "0.2"
 git2 = "0.21"
 auth-git2 = "0.6"
+ureq = "2"
+rpassword = "7"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "vendored"] }
 
 [profile.release]
 lto = true

@@ -285,3 +285,47 @@ button i.fa-solid { display: block; line-height: 1; }
 .set-pane [role=menuitemcheckbox] .tick i { visibility: hidden; font-size: 10px; width: auto; margin: 0; }
 .set-pane [role=menuitemcheckbox][aria-checked=true] .tick i { visibility: visible; }
 .set-hint { display: block; padding: 4px 10px; color: var(--muted); }
+
+/* ---- note editor: name field + notes dropdown ---- */
+.note-head { display: flex; align-items: center; gap: 8px; }
+.note-head .note-name, .note-head .note-pick { font: inherit; color: var(--text); background: color-mix(in srgb, var(--bg) 60%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+.note-head .note-name { width: 14em; max-width: 40vw; }
+.note-head .note-name:focus, .note-head .note-pick:focus { outline: none; border-color: var(--accent); }
+.note-err { color: var(--danger); }
+.note-count { font-size: 10px; margin-left: 2px; color: var(--accent); }
+.note-menu button { display: flex; align-items: center; gap: .4em; width: 100%; height: auto; }
+
+/* ---- WebDAV ---- */
+.dav-servers { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 12px; }
+.dav-server { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.dav-server .dav-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dav-server button, .dav-foot button, .dav-form button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 6px; padding: 4px 10px; display: inline-flex; align-items: center; gap: .4em; }
+.dav-server button.danger:hover { color: var(--danger); }
+.bad { color: var(--danger); }
+.dav-form { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.dav-form h3 { margin: 4px 0; font-size: 14px; }
+.dav-form label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.dav-box input, .dav-form input, .dav-box select { font: inherit; color: var(--text); background: color-mix(in srgb, var(--bg) 60%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+.dav-box input:focus, .dav-form input:focus { outline: none; border-color: var(--accent); }
+.dav-msg { min-height: 1.2em; color: var(--muted); font-size: 13px; margin-top: 6px; }
+.dav-msg.bad { color: var(--danger); }
+.dav-box { width: min(640px, 94vw); max-height: 86vh; display: flex; flex-direction: column; box-sizing: border-box; }
+.dav-top { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.dav-top .dav-crumb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; direction: rtl; text-align: left; }
+.dav-list { flex: 1; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; }
+.dav-item { display: flex; align-items: center; gap: .5em; border: 0; background: none; color: var(--text); text-align: left; padding: 7px 10px; }
+.dav-item:hover { background: var(--hover); }
+.dav-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.dav-foot input { flex: 1; min-width: 8em; }
+
+/* ---- touch toolbar (under the input; Settings -> General) ---- */
+.touchbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.touchbar[hidden] { display: none; }
+.touchbar .tb-group { display: inline-flex; gap: 4px; flex: none; }
+.touchbar .tb { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: .3em; min-width: 44px; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-weight: 600; touch-action: manipulation; }
+.touchbar .tb:hover { background: var(--hover); }
+.touchbar .tb:active { border-color: var(--accent); }
+.touchbar .tb-add { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.touchbar .tb-p { min-width: 44px; padding: 0; }
+.touchbar .tb i { display: block; line-height: 1; }
+.touchbar .tb.tk-pA { color: var(--pA); } .touchbar .tb.tk-pB { color: var(--pB); } .touchbar .tb.tk-pC { color: var(--pC); } .touchbar .tb.tk-pD { color: var(--pD); }

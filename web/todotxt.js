@@ -129,10 +129,28 @@ export function fixPriorityCase(text) {
   return text.replace(/^\(([a-z])\)/, (_, c) => `(${c.toUpperCase()})`);
 }
 
-/** Name of the note file of a task (`note:NAME`, without extension), or null. */
+/** All note names of a task (`note:NAME` words, without extension), in order: a task can have several notes. */
+export function noteNames(task) {
+  const out = [];
+  for (const w of task.text.split(/\s+/)) {
+    const m = /^note:([\w.-]+)$/.exec(w);
+    if (m && !m[1].startsWith('.')) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Name of the first note file of a task, or null. */
 export function noteName(task) {
-  const n = task.tags.note;
-  return n && /^[\w.-]+$/.test(n) && !n.startsWith('.') ? n : null;
+  return noteNames(task)[0] || null;
+}
+
+/** `Note-A`, `Note-B`, ... : the first name not in `used` (compared case-insensitively). */
+export function nextNoteName(used) {
+  const low = new Set([...used].map((n) => n.toLowerCase()));
+  for (let i = 0; ; i++) {
+    const cand = i < 26 ? `Note-${String.fromCharCode(65 + i)}` : `Note-${i + 1}`;
+    if (!low.has(cand.toLowerCase())) return cand;
+  }
 }
 
 /** File-name-safe short name derived from a task description. */

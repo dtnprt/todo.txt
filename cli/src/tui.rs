@@ -182,7 +182,7 @@ struct App {
     picker: Option<Picker>,
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
-    pending_editor: Option<PathBuf>,
+    pending_editor: Option<folder::NoteFile>,
     store: Store,
     undo: Vec<Vec<String>>,
     sort: Sort,
@@ -211,7 +211,7 @@ struct App {
 pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()> {
     let store = Store::load(&path)?;
     let cfg = config::Config::load();
-    let disk_text = fs::read_to_string(&path).unwrap_or_default();
+    let disk_text = crate::store::read_text(&path).map(|r| r.0).unwrap_or_default();
     let mut app = App {
         path,
         folder,
@@ -263,21 +263,18 @@ impl App {
                     }
                 }
             }
-            if let Some(p) = self.pending_editor.take() {
+            if let Some(n) = self.pending_editor.take() {
                 // give the terminal to the editor, then take it back
                 ratatui::restore();
-                let res = folder::edit_in_editor(&p);
+                let res = folder::edit_in_editor(&n.local);
                 *terminal = ratatui::init();
-                self.msg = Some(match res {
+                self.msg = Some(match res.and_then(|_| folder::finish_note(&n)) {
                     Ok(()) => {
                         self.git_commit();
-                        format!("Note saved: {}", p.display())
+                        format!("Note saved: {}", n.local.display())
                     }
                     Err(e) => format!("Editor failed: {e}"),
                 });
-                if fs::metadata(&p).is_ok_and(|m| m.len() == 0) {
-                    let _ = fs::remove_file(&p); // an empty note file is not worth keeping
-                }
             }
             if let Some(m) = git::take_result() {
                 self.msg = Some(m); // outcome of a background push
@@ -285,7 +282,7 @@ impl App {
             if self.git_checked.elapsed() >= Duration::from_secs(2) {
                 self.refresh_git_status();
             }
-            if self.last_check.elapsed() >= Duration::from_secs(1) {
+            if self.last_check.elapsed() >= Duration::from_secs(if crate::webdav::is_remote(&self.path.to_string_lossy()) { 8 } else { 1 }) {
                 self.check_external();
             }
         }
@@ -304,7 +301,7 @@ impl App {
         if matches!(self.mode, Mode::Edit(_)) {
             return;
         }
-        let Ok(text) = fs::read_to_string(&self.path) else { return };
+        let Ok((text, _)) = crate::store::read_text(&self.path) else { return };
         if text == self.disk_text {
             return;
         }
@@ -346,7 +343,7 @@ impl App {
         }
         match Store::load(&path) {
             Ok(store) => {
-                self.disk_text = fs::read_to_string(&path).unwrap_or_default();
+                self.disk_text = crate::store::read_text(&path).map(|r| r.0).unwrap_or_default();
                 self.store = store;
                 self.undo.clear();
                 self.filter.clear();
@@ -375,16 +372,16 @@ impl App {
         }
         let Some(i) = self.sel_line else { return };
         let t = todotxt::parse(&self.store.lines[i]);
-        let name = match folder::note_name(&t.tags) {
+        let name = match folder::note_name(&t) {
             Some(n) => n,
             None => {
-                let n = folder::unique_note_name(&folder::slugify(&t.text), &self.store.lines, self.folder.as_deref());
+                let n = folder::next_note_name(&self.store.lines, self.folder.as_deref());
                 let raw = format!("{} note:{n}", self.store.lines[i]);
                 self.replace_line(i, raw);
                 n
             }
         };
-        match folder::ensure_note_file(self.folder.as_deref(), &name) {
+        match folder::prepare_note(&self.path, self.folder.as_deref(), &name) {
             Ok(p) => self.pending_editor = Some(p),
             Err(e) => self.msg = Some(format!("Could not create note file: {e}")),
         }
@@ -576,7 +573,7 @@ impl App {
         let mut lines = self.store.lines.clone();
         let gone = lines.remove(i);
         self.commit(lines);
-        folder::remove_note(self.folder.as_deref(), &gone, &self.store.lines);
+        folder::remove_note(&self.path, self.folder.as_deref(), &gone, &self.store.lines);
         self.msg = Some(format!("Deleted: {gone}  (note file removed)"));
     }
 

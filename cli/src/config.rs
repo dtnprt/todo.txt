@@ -31,6 +31,8 @@ pub struct Config {
     pub statusbar: Option<bool>,
     /// All known todo.txt files (`files=["a","b"]`, JSON array, shared with the desktop app).
     pub files: Vec<PathBuf>,
+    /// WebDAV servers as `USER@URL` (`webdav=["a@https://host/dav/"]`, shared with the desktop app); passwords are in the keyring.
+    pub webdav: Vec<String>,
     /// Keys this version does not know about.
     other: Vec<(String, String)>,
 }
@@ -56,6 +58,7 @@ impl Config {
                 "sidebar" => cfg.sidebar = parse_bool(v),
                 "calendar" => cfg.calendar = parse_bool(v),
                 "statusbar" => cfg.statusbar = parse_bool(v),
+                "webdav" => cfg.webdav = parse_json_strings(v),
                 "files" => cfg.files = parse_json_strings(v).into_iter().map(PathBuf::from).collect(),
                 _ => cfg.other.push((k.to_string(), v.to_string())),
             }
@@ -86,6 +89,11 @@ impl Config {
         if !self.files.is_empty() {
             let items: Vec<String> = self.files.iter().map(|f| json_string(&f.display().to_string())).collect();
             out.push_str(&format!("files=[{}]\n", items.join(",")));
+        }
+        if !self.webdav.is_empty() {
+            let items: Vec<String> = self.webdav.iter().map(|f| json_string(f)).collect();
+            out.push_str(&format!("webdav=[{}]
+", items.join(",")));
         }
         for (k, v) in &self.other {
             out.push_str(&format!("{k}={v}\n"));
