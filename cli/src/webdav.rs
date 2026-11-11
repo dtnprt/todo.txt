@@ -119,6 +119,8 @@ pub enum Error {
     NotFound,
     /// The file changed on the server since it was read (HTTP 412).
     Conflict,
+    /// The server cannot be reached (network down, DNS, timeout): the offline cache steps in.
+    Offline(String),
     Other(String),
 }
 
@@ -127,6 +129,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::NotFound => write!(f, "not found on the server"),
             Error::Conflict => write!(f, "the file was changed on the server meanwhile (reload it first)"),
+            Error::Offline(s) => write!(f, "server not reachable: {s}"),
             Error::Other(s) => write!(f, "{s}"),
         }
     }
@@ -173,7 +176,7 @@ fn call(server: &Server, method: &str, url: &str, headers: &[(&str, &str)], body
         Err(ureq::Error::Status(401, _)) => Err(Error::Other("login failed (401): check user name and password".into())),
         Err(ureq::Error::Status(403, _)) => Err(Error::Other("access denied (403)".into())),
         Err(ureq::Error::Status(c, r)) => Err(Error::Other(format!("server answered {c} {}", r.status_text()))),
-        Err(e) => Err(Error::Other(e.to_string())),
+        Err(ureq::Error::Transport(t)) => Err(Error::Offline(t.to_string())),
     }
 }
 

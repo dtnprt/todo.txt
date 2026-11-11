@@ -202,6 +202,8 @@ struct App {
     picker: Option<Picker>,
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
+    /// "Changed on the server" popup (WebDAV): removed lines, added lines, scroll.
+    server_diff: Option<(Vec<String>, Vec<String>, usize)>,
     /// Note being edited in the popup (F7, or a `note:` typed into the bar).
     note_edit: Option<NoteEdit>,
     /// Name of the note being written for a `note:` typed into the bar (finishes the word afterwards).
@@ -243,6 +245,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         last_check: Instant::now(),
         picker: None,
         git_menu: None,
+        server_diff: None,
         note_edit: None,
         store,
         undo: Vec::new(),
@@ -318,6 +321,10 @@ impl App {
         if let Ok(new) = Store::load(&self.path) {
             if new.lines != self.store.lines {
                 let old = std::mem::replace(&mut self.store, new);
+                if crate::webdav::is_remote(&self.path.to_string_lossy()) {
+                    let (removed, added) = list::line_diff(&old.lines, &self.store.lines);
+                    self.server_diff = Some((removed, added, 0));
+                }
                 self.undo.push(old.lines);
                 if self.undo.len() > 200 {
                     self.undo.remove(0);
@@ -576,6 +583,9 @@ impl App {
         match self.store.save(&self.path) {
             Ok(()) => {
                 self.disk_text = self.store.text();
+                if crate::davcache::is_offline() && crate::webdav::is_remote(&self.path.to_string_lossy()) {
+                    self.msg = Some("Server not reachable: saved in the offline cache, synced when it is back".into());
+                }
                 self.git_commit();
                 self.refresh_git_status(); // status line shows the new git state at once
             }
@@ -722,9 +732,9 @@ impl App {
                 .filter(|l| !l.trim().is_empty())
                 .filter(|l| {
                     let t = todotxt::parse(l);
-                    (skip == 0 || f.project.as_ref().map_or(true, |p| t.projects.contains(p)))
-                        && (skip == 1 || f.context.as_ref().map_or(true, |c| t.contexts.contains(c)))
-                        && (skip == 2 || f.priority.map_or(true, |p| t.priority == Some(p)))
+                    (skip == 0 || f.project.is_empty() || f.project.iter().any(|p| t.projects.contains(p)))
+                        && (skip == 1 || f.context.is_empty() || f.context.iter().any(|c| t.contexts.contains(c)))
+                        && (skip == 2 || f.priority.is_empty() || t.priority.map_or(false, |p| f.priority.contains(&p)))
                 })
                 .cloned()
                 .collect()
@@ -742,14 +752,36 @@ impl App {
         v
     }
 
-    fn toggle_side(&mut self, e: &Side) {
-        fn toggle<T: PartialEq + Clone>(slot: &mut Option<T>, v: T) {
-            *slot = if slot.as_ref() == Some(&v) { None } else { Some(v) };
+    /// `multi` (Space / Ctrl+Enter): add or remove the entry, keeping the others of its section
+    /// (like Ctrl+click in the GUI). Otherwise (Enter): only this entry, or none if it is the only one.
+    fn toggle_side(&mut self, e: &Side, multi: bool) {
+        fn toggle<T: PartialEq + Clone>(slot: &mut Vec<T>, v: T, multi: bool) {
+            if multi {
+                if let Some(i) = slot.iter().position(|x| *x == v) {
+                    slot.remove(i);
+                } else {
+                    slot.push(v);
+                }
+            } else if slot.len() == 1 && slot[0] == v {
+                slot.clear();
+            } else {
+                *slot = vec![v];
+            }
         }
         match e {
-            Side::Project(p) => toggle(&mut self.filter.project, p.clone()),
-            Side::Context(c) => toggle(&mut self.filter.context, c.clone()),
-            Side::Priority(p) => toggle(&mut self.filter.priority, *p),
+            Side::Project(p) => toggle(&mut self.filter.project, p.clone(), multi),
+            Side::Context(c) => toggle(&mut self.filter.context, c.clone(), multi),
+            Side::Priority(p) => toggle(&mut self.filter.priority, *p, multi),
+        }
+        self.reload_view();
+    }
+
+    /// Clear the filter of the section the sidebar cursor is in (the `[x]` shown at its title).
+    fn clear_side_section(&mut self, e: &Side) {
+        match e {
+            Side::Project(_) => self.filter.project.clear(),
+            Side::Context(_) => self.filter.context.clear(),
+            Side::Priority(_) => self.filter.priority.clear(),
         }
         self.reload_view();
     }
@@ -1025,6 +1057,19 @@ impl App {
 
     fn on_key(&mut self, k: KeyEvent) {
         self.msg = None;
+        if let Some((rem, add, scroll)) = self.server_diff.as_mut() {
+            let max = (rem.len() + add.len()).saturating_sub(1);
+            match k.code {
+                KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Down => *scroll = (*scroll + 1).min(max),
+                KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+                KeyCode::PageDown => *scroll = (*scroll + 10).min(max),
+                KeyCode::Home => *scroll = 0,
+                KeyCode::End => *scroll = max,
+                _ => self.server_diff = None,
+            }
+            return;
+        }
         if self.note_edit.is_some() {
             self.note_key(k);
             return;
@@ -1174,9 +1219,17 @@ impl App {
             KeyCode::Up => self.side_idx = self.side_idx.saturating_sub(1),
             KeyCode::Down => self.side_idx = (self.side_idx + 1).min(n.saturating_sub(1)),
             KeyCode::Enter | KeyCode::Char(' ') => {
+                // Space (or Ctrl+Enter) = add/remove, Enter = only this one
+                let multi = k.code == KeyCode::Char(' ') || k.modifiers.contains(KeyModifiers::CONTROL);
                 if let Some((e, _)) = entries.get(self.side_idx) {
                     let e = e.clone();
-                    self.toggle_side(&e);
+                    self.toggle_side(&e, multi);
+                }
+            }
+            KeyCode::Delete | KeyCode::Backspace => {
+                if let Some((e, _)) = entries.get(self.side_idx) {
+                    let e = e.clone();
+                    self.clear_side_section(&e);
                 }
             }
             KeyCode::Tab | KeyCode::Esc | KeyCode::Right => self.focus = Focus::List,
@@ -1308,9 +1361,38 @@ impl App {
         if self.note_edit.is_some() {
             self.draw_note_edit(f, area);
         }
+        if self.server_diff.is_some() {
+            self.draw_server_diff(f, area);
+        }
         if self.help {
             self.draw_help(f, area);
         }
+    }
+
+    /// Popup listing what changed on the WebDAV server (the new version was already loaded).
+    fn draw_server_diff(&self, f: &mut Frame, area: Rect) {
+        let Some((rem, add, scroll)) = &self.server_diff else { return };
+        let w = 90.min(area.width.saturating_sub(2));
+        let want = (rem.len() + add.len() + 4).max(6);
+        let h = want.min(area.height.saturating_sub(2).max(6) as usize).min(area.height as usize) as u16;
+        let rect = Rect::new(area.x + area.width.saturating_sub(w) / 2, area.y + area.height.saturating_sub(h) / 2, w, h);
+        f.render_widget(Clear, rect);
+        let mut lines: Vec<Line> = Vec::new();
+        for l in rem {
+            lines.push(Line::from(Span::styled(format!("- {l}"), Style::default().fg(Color::Red))));
+        }
+        for l in add {
+            lines.push(Line::from(Span::styled(format!("+ {l}"), Style::default().fg(Color::Green))));
+        }
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled("Only the order of the lines changed.", dim())));
+        }
+        let title = format!(" Changed on the server: {} removed, {} added ", rem.len(), add.len());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_bottom(" Ctrl+Z undoes · ↑↓ scroll · any other key closes ");
+        f.render_widget(Paragraph::new(lines).block(block).scroll((*scroll as u16, 0)), rect);
     }
 
     fn draw_git_menu(&self, f: &mut Frame, area: Rect) {
@@ -1421,21 +1503,24 @@ impl App {
         let mut section = "";
         for (i, (e, count)) in entries.iter().enumerate() {
             let (title, label, active, tok) = match e {
-                Side::Project(p) => ("Projects", format!("+{p}"), self.filter.project.as_deref() == Some(p), Tok::Project),
-                Side::Context(c) => ("Contexts", format!("@{c}"), self.filter.context.as_deref() == Some(c), Tok::Context),
-                Side::Priority(p) => ("Priority", format!("({p})"), self.filter.priority == Some(*p), Tok::Priority(*p)),
+                Side::Project(p) => ("Projects", format!("+{p}"), self.filter.project.contains(p), Tok::Project),
+                Side::Context(c) => ("Contexts", format!("@{c}"), self.filter.context.contains(c), Tok::Context),
+                Side::Priority(p) => ("Priority", format!("({p})"), self.filter.priority.contains(p), Tok::Priority(*p)),
             };
             if title != section {
                 section = title;
-                let x = if (title == "Projects" && self.filter.project.is_some())
-                    || (title == "Contexts" && self.filter.context.is_some())
-                    || (title == "Priority" && self.filter.priority.is_some())
-                {
-                    " x"
-                } else {
-                    ""
-                };
-                lines.push(Line::from(Span::styled(format!("{title}{x}"), dim().add_modifier(Modifier::BOLD))));
+                let on = (title == "Projects" && !self.filter.project.is_empty())
+                    || (title == "Contexts" && !self.filter.context.is_empty())
+                    || (title == "Priority" && !self.filter.priority.is_empty());
+                let mut spans = vec![Span::styled(title.to_string(), dim().add_modifier(Modifier::BOLD))];
+                if on {
+                    // clear button at the right (Del / Backspace on an entry of the section)
+                    let x = "[x]";
+                    let pad = (inner.width as usize).saturating_sub(title.width() + x.width());
+                    spans.push(Span::raw(" ".repeat(pad)));
+                    spans.push(Span::styled(x, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+                }
+                lines.push(Line::from(spans));
             }
             let mut st = tok_style(tok);
             if active {
@@ -1555,15 +1640,9 @@ impl App {
             if !self.filter.q.trim().is_empty() {
                 parts.push(format!("\"{}\"", self.filter.q.trim()));
             }
-            if let Some(p) = &self.filter.project {
-                parts.push(format!("+{p}"));
-            }
-            if let Some(c) = &self.filter.context {
-                parts.push(format!("@{c}"));
-            }
-            if let Some(p) = self.filter.priority {
-                parts.push(format!("({p})"));
-            }
+            parts.extend(self.filter.project.iter().map(|p| format!("+{p}")));
+            parts.extend(self.filter.context.iter().map(|c| format!("@{c}")));
+            parts.extend(self.filter.priority.iter().map(|p| format!("({p})")));
             right = format!(" filter: {} (Esc clears) ·{right}", parts.join(" "));
         }
         let left = match &self.msg {
@@ -1571,7 +1650,7 @@ impl App {
             None => Span::styled(
                 match self.focus {
                     Focus::List => " ↑↓ select · Space done · Enter edit · Del delete · Alt+↑↓ priority · / search · F7 note · F8 files · F1 help",
-                    Focus::Sidebar => " ↑↓ select · Enter filter · Tab back · F1 help",
+                    Focus::Sidebar => " ↑↓ select · Enter only this · Space add/remove · Del clear section · Tab back · F1 help",
                     Focus::Input => " Enter ok · Tab complete/list · Esc back · F1 help",
                 },
                 dim(),
@@ -1583,7 +1662,28 @@ impl App {
         if let Some(st) = &self.git_status {
             used += st.label().width() + 8;
         }
-        if let Some(dir) = &self.folder {
+        let remote_path = self.path.to_string_lossy().into_owned();
+        if crate::webdav::is_remote(&remote_path) && crate::davcache::is_offline() {
+            let pend = crate::davcache::pending_changes(&remote_path).map_or(String::new(), |(r, a)| format!(" · {} pending", r + a));
+            spans.push(Span::styled(format!(" offline{pend} "), Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled("│", dim()));
+            used += 12 + pend.width();
+        }
+        if crate::webdav::is_remote(&remote_path) {
+            // WebDAV: show the full address on the left (shortened from the front when there is no room)
+            let room = (cols[0].width as usize).saturating_sub(used + 4).min(cols[0].width as usize * 55 / 100);
+            let shown: String = if remote_path.width() > room {
+                let keep = room.saturating_sub(1);
+                let tail: String = remote_path.chars().rev().take(keep).collect::<Vec<_>>().into_iter().rev().collect();
+                format!("…{tail}")
+            } else {
+                remote_path.clone()
+            };
+            if room > 8 {
+                spans.push(Span::styled(format!(" {shown} "), dim()));
+                spans.push(Span::styled("│", dim()));
+            }
+        } else if let Some(dir) = &self.folder {
             let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| dir.display().to_string());
             if used + name.width() + 4 <= cols[0].width as usize {
                 spans.push(Span::styled(format!(" {name} "), dim()));
@@ -1717,6 +1817,8 @@ impl App {
             "           Delete       delete (Ctrl+Z undoes)",
             "           Alt+↑ / Alt+↓  raise / lower priority",
             "           Tab          sidebar filters   Esc  clear filter / quit",
+            "Sidebar:   Enter only this entry   Space add/remove (several = OR in a section)",
+            "           Del / Backspace clear that section's filter ([x] at its title)",
             "           any other key starts typing a new task",
             "Bar:       Enter add / save   Esc back   /  search (first char)",
             "           Tab accept suggestion (+tag @context (P) due:date)",

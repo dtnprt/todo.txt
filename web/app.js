@@ -48,12 +48,13 @@ const state = {
   dirHandle: null,      // FileSystemDirectoryHandle of the folder (browser, File System Access API)
   folderFiles: [],      // visible *.txt file names in the folder
   git: null,            // desktop + folder mode: settings of .todo-git.cfg (see git_info), else null
+  davState: null,      // WebDAV offline cache state (status bar), null when not a remote file
   gitStatus: null,     // {label, summary, ...} from git_status (status bar, left), null if not a repo
   gitMsg: '',           // last git message, shown in the status bar for a while
   handle: null,        // FileSystemFileHandle when opened/saved via File System Access API
   fileName: 'todo.txt',
   dirty: false,
-  filter: { q: '', project: null, context: null, priority: null },
+  filter: { q: '', project: [], context: [], priority: [] },
   showDone: true,
   sidebar: true,
   calendar: true,
@@ -151,13 +152,34 @@ async function writeAny(p, text) {
   if (!isRemote(p)) return tauri.fs.writeTextFile(p, text);
   const entry = davEntry(p);
   if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
+  let r;
   try {
-    davEtag = await invoke('webdav_put', { entry, url: p, text, etag: davEtag });
+    r = await invoke('webdav_put', { entry, url: p, text, etag: davEtag });
   } catch (e) {
     if (!String(e).startsWith('conflict:')) throw e;
     if (!confirm('The file was changed on the server meanwhile.\nOverwrite it with your version? (Cancel keeps the server version; use File → Reload from disk to load it.)')) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
-    davEtag = await invoke('webdav_put', { entry, url: p, text, etag: null });
+    r = await invoke('webdav_put', { entry, url: p, text, etag: null });
   }
+  davEtag = r.etag;
+  if (r.merged != null) {
+    // the server had changed while we were offline: the offline cache merged both versions
+    const newLines = T.parseFile(r.merged);
+    const diff = lineDiff(state.lines, newLines);
+    commit(newLines);
+    diskText = r.merged;
+    persist(); render();
+    showServerDiff(diff, false);
+  }
+  refreshDavState();
+}
+
+/** Offline cache state of the open WebDAV file (status bar): {offline, pending: [removed, added] | null}. */
+async function refreshDavState() {
+  let st = null;
+  if (isTauri && state.path && isRemote(state.path)) {
+    try { st = await invoke('webdav_state', { url: state.path }); } catch { st = null; }
+  }
+  if (JSON.stringify(st) !== JSON.stringify(state.davState)) { state.davState = st; render(); }
 }
 
 function loadText(text, name, handle = null, path = null, etag = null) {
@@ -171,7 +193,7 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   diskText = path || handle ? text : null;
   state.dirty = false;
   state.editing = null;
-  state.filter = { q: '', project: null, context: null, priority: null };
+  state.filter = { q: '', project: [], context: [], priority: [] };
   composer.clearSearch();
   persist();
   render();
@@ -470,6 +492,44 @@ async function save({ as = false } = {}) {
   }
 }
 
+/** Lines removed / added between two versions (order-independent: the list may be sorted differently). */
+function lineDiff(oldLines, newLines) {
+  const count = (arr) => arr.reduce((m, l) => m.set(l, (m.get(l) || 0) + 1), new Map());
+  const o = count(oldLines), n = count(newLines);
+  const removed = [], added = [];
+  for (const l of oldLines) { const k = n.get(l) || 0; if (k) n.set(l, k - 1); else removed.push(l); }
+  for (const l of newLines) { const k = o.get(l) || 0; if (k) o.set(l, k - 1); else added.push(l); }
+  return { removed, added };
+}
+/**
+ * Overlay with the difference between the local list and the version on the WebDAV server.
+ * `ask`: there are unsaved local changes -> buttons "Load server version" / "Keep mine", resolves true = load.
+ * Otherwise the server version was already loaded (undoable): informational, resolves on close.
+ */
+function showServerDiff({ removed, added }, ask) {
+  return new Promise((resolve) => {
+    const rows = (lines, cls, sign) => lines.map((l) => el('div', { className: 'diff-line ' + cls }, el('span', { className: 'diff-sign', textContent: sign }), el('span', { textContent: l })));
+    const close = (v) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } };
+    const body = el('div', { className: 'diff-body' }, ...rows(removed, 'del', '−'), ...rows(added, 'add', '+'));
+    if (!removed.length && !added.length) body.append(el('div', { className: 'set-hint', textContent: 'Only the order of the lines changed.' }));
+    const buttons = ask
+      ? [el('button', { type: 'button', className: 'primary', textContent: 'Load server version', onclick: () => close(true) }),
+         el('button', { type: 'button', textContent: 'Keep mine', onclick: () => close(false) })]
+      : [el('button', { type: 'button', className: 'primary', textContent: 'OK', onclick: () => close(false) })];
+    const ov = el('div', { className: 'help dav-diff', onmousedown: (e) => { if (e.target === ov) close(false); } },
+      el('div', { className: 'help-box diff-box', role: 'dialog', 'aria-label': 'Changed on server' },
+        el('h2', { textContent: 'The file was changed on the server' }),
+        el('div', { className: 'set-hint', textContent: ask
+          ? `${removed.length} line(s) removed, ${added.length} added there. You have unsaved changes: load the server version (discards them) or keep yours (saving overwrites the server).`
+          : `${removed.length} line(s) removed, ${added.length} added. The server version was loaded (Undo restores yours).` }),
+        body, el('div', { className: 'diff-actions' }, ...buttons)));
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(ov);
+    buttons[0].focus();
+  });
+}
+
 // Reload the open file when another program changed it (desktop: polled), or on demand (Refresh button).
 let checking = false;
 let manualCheck = false;
@@ -483,9 +543,11 @@ async function readCurrent() {
         if (Date.now() - davCheckedAt < 8000) return null;
         davCheckedAt = Date.now();
         const tag = await invoke('webdav_etag', { entry, url: state.path });
+        refreshDavState();
         if (tag === davEtag || tag === null) return null;
       }
       const r = await invoke('webdav_get', { entry, url: state.path });
+      refreshDavState();
       if (r.missing) return null;
       davEtag = r.etag;
       return r.text;
@@ -510,11 +572,19 @@ async function checkExternalChange(manual = false) {
     const same = T.serializeFile(T.parseFile(text)) === T.serializeFile(state.lines);
     if (same) return;
     if (first && !manual && state.dirty) return; // keep unsaved work from last session
-    if (state.dirty && !confirm('The file was changed on disk. Reload it and discard your unsaved changes?')) return;
-    commit(T.parseFile(text)); // keeps an undo step
+    const remote = !!state.path && isRemote(state.path);
+    const newLines = T.parseFile(text);
+    const diff = remote ? lineDiff(state.lines, newLines) : null;
+    const wasDirty = state.dirty;
+    if (wasDirty) {
+      const load = remote ? await showServerDiff(diff, true) : confirm('The file was changed on disk. Reload it and discard your unsaved changes?');
+      if (!load) return;
+    }
+    commit(newLines); // keeps an undo step
     state.dirty = false;
     persist();
     render();
+    if (remote && !wasDirty) showServerDiff(diff, false);   // informational, not awaited
   } catch (e) {
     console.warn('Reload failed:', e);
     if (manual) alert(`Could not read file: ${e.message || e}`);
@@ -949,9 +1019,9 @@ function visibleTasks() {
   state.lines.forEach((raw, i) => {
     const t = T.parse(raw);
     if (!state.showDone && t.done) return;
-    if (f.project && !t.projects.includes(f.project)) return;
-    if (f.context && !t.contexts.includes(f.context)) return;
-    if (f.priority && t.priority !== f.priority) return;
+    if (f.project.length && !f.project.some((p) => t.projects.includes(p))) return;
+    if (f.context.length && !f.context.some((c) => t.contexts.includes(c))) return;
+    if (f.priority.length && !f.priority.includes(t.priority)) return;
     if (q && !raw.toLowerCase().includes(q)) return;
     items.push({ i, t });
   });
@@ -990,9 +1060,9 @@ function countBy(pick, includeDone = false, skip = null) {
   for (const raw of state.lines) {
     const t = T.parse(raw);
     if (t.done && !includeDone) continue;
-    if (skip !== 'project' && f.project && !t.projects.includes(f.project)) continue;
-    if (skip !== 'context' && f.context && !t.contexts.includes(f.context)) continue;
-    if (skip !== 'priority' && f.priority && t.priority !== f.priority) continue;
+    if (skip !== 'project' && f.project.length && !f.project.some((p) => t.projects.includes(p))) continue;
+    if (skip !== 'context' && f.context.length && !f.context.some((c) => t.contexts.includes(c))) continue;
+    if (skip !== 'priority' && f.priority.length && !f.priority.includes(t.priority)) continue;
     for (const k of new Set(pick(t))) m.set(k, (m.get(k) || 0) + 1);
   }
   return [...m].sort((a, b) => a[0].localeCompare(b[0]));
@@ -1006,8 +1076,11 @@ const el = (tag, props = {}, ...kids) => {
   return e;
 };
 
-function toggleFilter(key, value) {
-  state.filter[key] = state.filter[key] === value ? null : value;
+/** Plain click: only this value (or none if it is the only one selected). Ctrl/Cmd/Shift click: add/remove it. */
+function toggleFilter(key, value, multi = false) {
+  const cur = state.filter[key];
+  if (multi) state.filter[key] = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
+  else state.filter[key] = cur.length === 1 && cur[0] === value ? [] : [value];
   render();
 }
 
@@ -1016,18 +1089,18 @@ function renderSidebar() {
   side.replaceChildren();
   const section = (title, entries, key, label = (k) => k, cls = () => '') => {
     const h = el('h2', {}, el('span', { textContent: title }));
-    if (state.filter[key]) {
+    if (state.filter[key].length) {
       h.append(el('button', {
-        className: 'clear-x', textContent: 'x', title: `Clear ${title.toLowerCase()} filter`,
-        onclick: () => { state.filter[key] = null; render(); },
+        className: 'clear-x', textContent: '✕', title: `Clear ${title.toLowerCase()} filter`,
+        onclick: () => { state.filter[key] = []; render(); },
       }));
     }
     side.append(h);
     if (!entries.length) side.append(el('div', { className: 'side-empty', textContent: 'None' }));
     for (const [k, n] of entries) {
       side.append(el('button', {
-        className: 'side-item' + (state.filter[key] === k ? ' active' : ''),
-        onclick: () => toggleFilter(key, k),
+        className: 'side-item' + (state.filter[key].includes(k) ? ' active' : ''),
+        onclick: (e) => toggleFilter(key, k, e.ctrlKey || e.metaKey || e.shiftKey),
       }, el('span', { className: cls(k), textContent: label(k) }), el('span', { className: 'n', textContent: n })));
     }
   };
@@ -1051,9 +1124,9 @@ function renderText(t, i) {
 function renderWords(frag, text, t, i) {
   for (const part of text.split(/(\s+)/)) {
     if (part.length > 1 && part[0] === '+') {
-      frag.append(el('button', { className: 'chip project', textContent: part, onclick: () => toggleFilter('project', part.slice(1)) }));
+      frag.append(el('button', { className: 'chip project', textContent: part, onclick: (e) => toggleFilter('project', part.slice(1), e.ctrlKey || e.metaKey || e.shiftKey) }));
     } else if (part.length > 1 && part[0] === '@') {
-      frag.append(el('button', { className: 'chip context', textContent: part, onclick: () => toggleFilter('context', part.slice(1)) }));
+      frag.append(el('button', { className: 'chip context', textContent: part, onclick: (e) => toggleFilter('context', part.slice(1), e.ctrlKey || e.metaKey || e.shiftKey) }));
     } else if (/^https?:\/\/\S+$/.test(part)) {
       frag.append(el('a', { href: part, textContent: part, target: '_blank', rel: 'noopener noreferrer' }));
     } else {
@@ -1254,16 +1327,25 @@ function render() {
 
   const open = state.lines.filter((l) => !T.parse(l).done).length;
   const f = state.filter;
-  const active = [f.q.trim() && `"${f.q.trim()}"`, f.project && '+' + f.project, f.context && '@' + f.context, f.priority && `(${f.priority})`].filter(Boolean);
+  const active = [f.q.trim() && `"${f.q.trim()}"`, ...f.project.map((p) => '+' + p), ...f.context.map((c) => '@' + c), ...f.priority.map((p) => `(${p})`)].filter(Boolean);
   const status = $('#status');
   const right = el('span', { className: 'status-right' }, `${open} open · ${state.lines.length} total · showing ${items.length}${state.gitMsg ? ' · ' + state.gitMsg : ''}`);
   if (active.length) {
     right.append(' · filter: ' + active.join(' '), ' ',
-      el('button', { textContent: 'clear', onclick: () => { state.filter.project = state.filter.context = state.filter.priority = null; composer.clearSearch(); render(); } }));
+      el('button', { textContent: 'clear', onclick: () => { state.filter.project = []; state.filter.context = []; state.filter.priority = []; composer.clearSearch(); render(); } }));
   }
   status.replaceChildren();
   const gs = state.gitStatus;
-  if (state.folder) {
+  if (state.path && isRemote(state.path) && state.davState?.offline) {
+    const p = state.davState.pending;
+    status.append(el('span', { className: 'status-offline', title: 'The WebDAV server is not reachable. Changes are kept in a local cache and synced automatically when it is back.',
+      textContent: 'offline' + (p ? ` · ${p[0] + p[1]} pending` : '') }));
+  }
+  if (state.path && isRemote(state.path)) {
+    let shown = state.path;
+    try { shown = decodeURI(state.path); } catch { /* keep raw */ }
+    status.append(el('span', { className: 'status-folder status-dav', title: shown, textContent: shown }));
+  } else if (state.folder) {
     const base = state.folder.replace(/[\/]+$/, '').split(/[\/]/).pop() || state.folder;
     status.append(el('span', { className: 'status-folder', title: state.folder, textContent: base }));
   }
@@ -1581,10 +1663,10 @@ function buildThemeMenu() {
     menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Put your own NAME.css in ~/.todo.txt/themes/ to add a theme.' }));
   }
   if (isTauri) {
-    const ex = el('button', { type: 'button', title: 'Write all built-in themes as NAME.css into ~/.todo.txt/themes (existing files are kept) so you can edit them' },
+    const ex = el('button', { type: 'button', className: 'theme-export', title: 'Write all built-in themes as NAME.css into ~/.todo.txt/themes (existing files are kept) so you can edit them' },
       el('i', { className: 'fa-solid fa-file-export' }), ' Export all themes to the themes folder');
     ex.onclick = exportThemes;
-    menu.append(el('hr'), ex);
+    menu.append(ex);
   }
   applyTheme();
 }
@@ -1747,6 +1829,12 @@ function wireDropdown(d) {
 }
 document.querySelectorAll('.dd').forEach(wireDropdown);
 document.addEventListener('click', closeMenus);
+// Also on mousedown anywhere outside an open menu (capture: works even where click is swallowed,
+// e.g. window dragging in frameless mode or handlers that stop propagation).
+document.addEventListener('mousedown', (e) => {
+  if (e.target.closest && e.target.closest('.dd')) return;
+  closeMenus();
+}, true);
 
 $('#undo').onclick = undo;
 $('#openFolder').onclick = openFolder;

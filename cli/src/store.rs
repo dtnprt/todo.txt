@@ -34,7 +34,8 @@ fn other(e: webdav::Error) -> io::Error {
 pub fn read_text(path: &Path) -> io::Result<(String, Option<String>)> {
     if webdav::is_remote(&path.to_string_lossy()) {
         let server = server_of(path)?;
-        webdav::get(&server, &path.to_string_lossy()).map_err(other)
+        // through the offline cache: unreachable server -> cached / pending local version
+        crate::davcache::get(&server, &path.to_string_lossy()).map(|g| (g.text, g.etag)).map_err(other)
     } else {
         fs::read_to_string(path).map(|t| (t, None))
     }
@@ -57,8 +58,8 @@ impl Store {
     pub fn save(&self, path: &Path) -> io::Result<()> {
         if webdav::is_remote(&path.to_string_lossy()) {
             let server = server_of(path)?;
-            let new = webdav::put(&server, &path.to_string_lossy(), &self.text(), self.etag.borrow().as_deref()).map_err(other)?;
-            *self.etag.borrow_mut() = new;
+            let r = crate::davcache::put(&server, &path.to_string_lossy(), &self.text(), self.etag.borrow().as_deref()).map_err(other)?;
+            *self.etag.borrow_mut() = r.etag;
             return Ok(());
         }
         save_lines(path, &self.lines, self.crlf)

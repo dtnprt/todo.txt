@@ -9,6 +9,9 @@ mod git;
 // WebDAV storage + keyring credentials: the same code as the terminal app
 #[path = "../../cli/src/webdav.rs"]
 mod webdav;
+// offline cache for WebDAV files (pending changes are synced when the server is back)
+#[path = "../../cli/src/davcache.rs"]
+mod davcache;
 
 use std::collections::HashSet;
 use std::fs;
@@ -348,15 +351,38 @@ struct DavFile {
     etag: Option<String>,
     /// The file does not exist yet (it is created on the first save).
     missing: bool,
+    /// The server is not reachable: this is the cached / pending local version.
+    offline: bool,
+}
+
+#[derive(serde::Serialize)]
+struct DavPut {
+    etag: Option<String>,
+    /// Kept locally, will be synced when the server is back.
+    offline: bool,
+    /// The server had changed meanwhile: the merged text that is now on the server.
+    merged: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct DavState {
+    offline: bool,
+    /// Pending offline changes (lines removed, lines added), if any.
+    pending: Option<(usize, usize)>,
+}
+
+#[tauri::command]
+async fn webdav_state(url: String) -> Result<DavState, String> {
+    blocking(move || DavState { offline: davcache::is_offline(), pending: davcache::pending_changes(&url) }).await
 }
 
 #[tauri::command]
 async fn webdav_get(entry: String, url: String) -> Result<DavFile, String> {
     blocking(move || {
         let s = server(&entry)?;
-        match webdav::get(&s, &url) {
-            Ok((text, etag)) => Ok(DavFile { text, etag, missing: false }),
-            Err(webdav::Error::NotFound) => Ok(DavFile { text: String::new(), etag: None, missing: true }),
+        match davcache::get(&s, &url) {
+            Ok(g) => Ok(DavFile { text: g.text, etag: g.etag, missing: false, offline: g.offline }),
+            Err(webdav::Error::NotFound) => Ok(DavFile { text: String::new(), etag: None, missing: true, offline: false }),
             Err(e) => Err(e.to_string()),
         }
     })
@@ -365,10 +391,10 @@ async fn webdav_get(entry: String, url: String) -> Result<DavFile, String> {
 
 /// Write with `If-Match: etag`; the error text starts with `conflict:` when the file changed meanwhile.
 #[tauri::command]
-async fn webdav_put(entry: String, url: String, text: String, etag: Option<String>) -> Result<Option<String>, String> {
+async fn webdav_put(entry: String, url: String, text: String, etag: Option<String>) -> Result<DavPut, String> {
     blocking(move || {
         let s = server(&entry)?;
-        webdav::put(&s, &url, &text, etag.as_deref()).map_err(|e| match e {
+        davcache::put(&s, &url, &text, etag.as_deref()).map(|p| DavPut { etag: p.etag, offline: p.offline, merged: p.merged }).map_err(|e| match e {
             webdav::Error::Conflict => format!("conflict: {e}"),
             e => e.to_string(),
         })
@@ -380,7 +406,7 @@ async fn webdav_put(entry: String, url: String, text: String, etag: Option<Strin
 async fn webdav_etag(entry: String, url: String) -> Result<Option<String>, String> {
     blocking(move || {
         let s = server(&entry)?;
-        match webdav::etag(&s, &url) {
+        match davcache::etag(&s, &url) {
             Err(webdav::Error::NotFound) => Ok(None),
             r => r.map_err(|e| e.to_string()),
         }
@@ -427,6 +453,7 @@ pub fn run() {
             webdav_get,
             webdav_put,
             webdav_etag,
+            webdav_state,
             webdav_mkcol,
             webdav_delete
         ])

@@ -8,6 +8,7 @@
 //!   todo -e 3 | -c 3 TEXT | -d 3       edit / change / delete line 3
 
 mod config;
+mod davcache;
 mod editor;
 mod folder;
 mod textarea;
@@ -368,6 +369,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     // commit (+ push) when this run changed the todo file or the note, if .todo-git.cfg allows it
+    let _dav = if tui_mode { None } else { Some(DavNote(path.clone())) };
     let _auto = if tui_mode { None } else { Some(AutoCommit::new(folder.as_deref(), &path, cli.note.is_some())) };
 
     // ---- note ----
@@ -537,6 +539,22 @@ fn norm(text: &str, today: chrono::NaiveDate) -> String {
 
 /// Commits (and pushes) the folder when it is dropped at the end of the run, if the todo file changed
 /// meanwhile and `.todo-git.cfg` has git support and auto on.
+/// At the end of a CLI run: say so when the WebDAV server was not reachable (offline cache in use).
+struct DavNote(PathBuf);
+
+impl Drop for DavNote {
+    fn drop(&mut self) {
+        if !davcache::is_offline() {
+            return;
+        }
+        let url = self.0.to_string_lossy();
+        match davcache::pending_changes(&url) {
+            Some((r, a)) => eprintln!("todo: WebDAV not reachable: changes kept in the offline cache ({r} removed, {a} added), synced on the next run when the server is back"),
+            None => eprintln!("todo: WebDAV not reachable: showing the cached copy"),
+        }
+    }
+}
+
 struct AutoCommit {
     folder: Option<PathBuf>,
     auto: bool,

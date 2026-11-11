@@ -155,8 +155,8 @@ code.code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono
 .cal-quick { display: flex; justify-content: space-between; margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; color: var(--accent); }
 
 .sidebar h2 { display: flex; align-items: center; gap: 6px; }
-.clear-x { border: 0; background: none; padding: 0; font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--accent); cursor: pointer; }
-.clear-x:hover { text-decoration: underline; }
+.clear-x { margin-left: auto; border: 1px solid var(--accent); background: none; border-radius: 5px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1; text-transform: none; letter-spacing: 0; color: var(--accent); cursor: pointer; }
+.clear-x:hover { background: var(--accent); color: var(--accent-text); }
 .status { text-align: right; }
 .ac { overflow-y: auto; }
 .ac.below { bottom: auto; top: calc(100% + 6px); }
@@ -240,6 +240,7 @@ input[type=checkbox]:checked::after { visibility: visible; }
 body.minimal .status, body.nostatus .status { display: none !important; }
 body.minimal, body.nostatus { padding-bottom: 0; }
 body.minimal .composer, body.nostatus .composer { bottom: 0; }
+body.minimal .sidebar { top: 16px; max-height: calc(100vh - 32px); }
 body.minimal .topbar { position: fixed; top: 0; left: 0; right: 0; transform: translateY(-110%); transition: transform .15s; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 body.minimal.show-bar .topbar { transform: none; }
 .win-ctl { display: inline-flex; gap: 2px; margin-left: 4px; }
@@ -252,7 +253,7 @@ body.minimal.show-bar .topbar { transform: none; }
 .set-head { display: flex; align-items: center; justify-content: space-between; }
 .set-head h2 { margin: 0; }
 .set-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 8px 0; overflow-x: auto; flex-shrink: 0; }
-.set-tabs button { border: 0; background: none; padding: 6px 12px; border-bottom: 2px solid transparent; white-space: nowrap; }
+.set-tabs button { border: 0; border-radius: 0; background: none; padding: 6px 12px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .set-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 600; }
 .set-pane { overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .set-pane[hidden] { display: none; }
@@ -266,6 +267,8 @@ body.minimal.show-bar .topbar { transform: none; }
 .status { display: flex; justify-content: flex-end; gap: 16px; }
 .status[hidden] { display: none; }
 .status-folder { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 0; max-width: 30%; }
+.status-folder.status-dav { max-width: 55%; }
+.status-offline { color: var(--warn); font-weight: 600; margin-right: 10px; white-space: nowrap; }
 @media (max-width: 700px) { .status-folder { display: none; } }
 .status-git { margin-right: auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
 .status-git.dirty { color: var(--warn); }
@@ -289,7 +292,8 @@ button i.fa-solid { display: block; line-height: 1; }
 .set-pane [role=menuitemcheckbox] .tick i { visibility: hidden; font-size: 10px; width: auto; margin: 0; }
 .set-pane [role=menuitemcheckbox][aria-checked=true] .tick i { visibility: visible; }
 .set-sub { margin: 14px 0 6px; font-size: 1em; font-weight: 600; flex-shrink: 0; }
-#themeMenu { border: 1px solid var(--line); border-radius: 8px; padding: 4px; flex-shrink: 0; }
+#themeMenu { border: 1px solid var(--line); border-radius: 8px; padding: 4px; flex: 1 1 auto; min-height: 120px; overflow-y: auto; margin-right: 14px; }
+#themeMenu .theme-export { position: sticky; bottom: -4px; background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; margin-top: 4px; width: 100%; box-sizing: border-box; }
 .set-hint { display: block; padding: 4px 10px; color: var(--muted); }
 
 /* ---- note editor: name field + notes dropdown ---- */
@@ -343,3 +347,15 @@ button i.fa-solid { display: block; line-height: 1; }
 /* the GUI is not a document: no text marking; input fields and the note editor keep it */
 body { -webkit-user-select: none; user-select: none; }
 input, textarea, .note-field, .note-field * { -webkit-user-select: text; user-select: text; }
+
+/* ---- WebDAV: changed on the server (difference overlay) ---- */
+.diff-box { width: min(720px, calc(100vw - 56px)); max-height: calc(100vh - 56px); display: flex; flex-direction: column; box-sizing: border-box; }
+.diff-body { overflow: auto; flex: 1; min-height: 60px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.diff-line { display: flex; gap: 8px; padding: 2px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-line.del { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+.diff-line.add { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.diff-sign { flex: none; width: 1em; font-weight: 700; }
+.diff-line.del .diff-sign { color: var(--danger); }
+.diff-line.add .diff-sign { color: var(--ok); }
+.diff-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.diff-actions .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

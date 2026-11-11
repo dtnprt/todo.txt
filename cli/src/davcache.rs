@@ -1,0 +1,299 @@
+//! Offline cache for todo files on a WebDAV server (shared by the terminal app and the desktop app).
+//!
+//! Every remote file gets a folder `~/.todo.txt/cache/<hash of the URL>/`:
+//! - `base.txt` + `base.etag`: the version last seen on the server,
+//! - `local.txt`: only present while changes are *pending* (saved while the server was not reachable).
+//!
+//! * Reading while the server is unreachable returns the pending local version, else the cached base.
+//! * Saving while it is unreachable writes `local.txt` (nothing is lost, the app keeps working).
+//! * As soon as the server answers again (every read / ETag poll / save retries) the pending list is
+//!   synced: unchanged server -> pushed as is; changed server -> a line-based three-way merge
+//!   (base / local / server: lines removed locally are removed, lines added locally are added, everything
+//!   else comes from the server) is pushed, so neither side's changes get lost.
+//!
+//! Only the main todo file is cached (not the notes).
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::webdav::{self, Error, Server};
+
+static OFFLINE: AtomicBool = AtomicBool::new(false);
+
+/// True when the last server access failed because the server could not be reached.
+pub fn is_offline() -> bool {
+    OFFLINE.load(Ordering::Relaxed)
+}
+
+fn set_offline(v: bool) {
+    OFFLINE.store(v, Ordering::Relaxed);
+}
+
+fn home() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn dir(url: &str) -> PathBuf {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in url.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    home().join(".todo.txt").join("cache").join(format!("{h:016x}"))
+}
+
+fn read(d: &std::path::Path, name: &str) -> Option<String> {
+    fs::read_to_string(d.join(name)).ok()
+}
+
+fn write(d: &std::path::Path, name: &str, text: &str) {
+    let _ = fs::create_dir_all(d);
+    let _ = fs::write(d.join(name), text);
+}
+
+fn store_base(d: &std::path::Path, url: &str, text: &str, etag: Option<&str>) {
+    write(d, "base.txt", text);
+    write(d, "base.etag", etag.unwrap_or(""));
+    write(d, "url.txt", url);
+    let _ = fs::remove_file(d.join("local.txt"));
+}
+
+fn base_etag(d: &std::path::Path) -> Option<String> {
+    read(d, "base.etag").filter(|e| !e.is_empty())
+}
+
+/// Changes saved offline and not yet synced?
+pub fn pending(url: &str) -> bool {
+    dir(url).join("local.txt").exists()
+}
+
+/// Pending offline changes as (lines removed, lines added) relative to the last server version.
+pub fn pending_changes(url: &str) -> Option<(usize, usize)> {
+    let d = dir(url);
+    let local = read(&d, "local.txt")?;
+    let base = read(&d, "base.txt").unwrap_or_default();
+    let (r, a) = line_diff(&lines(&base), &lines(&local));
+    Some((r.len(), a.len()))
+}
+
+fn lines(text: &str) -> Vec<String> {
+    text.lines().map(str::to_string).collect()
+}
+
+/// Lines removed from / added to a list between two versions (order-independent; blank lines ignored).
+pub fn line_diff(old: &[String], new: &[String]) -> (Vec<String>, Vec<String>) {
+    fn count(v: &[String]) -> HashMap<&str, usize> {
+        let mut m = HashMap::new();
+        for l in v.iter().filter(|l| !l.trim().is_empty()) {
+            *m.entry(l.as_str()).or_insert(0) += 1;
+        }
+        m
+    }
+    let (mut o, mut n) = (count(old), count(new));
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+    for l in old.iter().filter(|l| !l.trim().is_empty()) {
+        match n.get_mut(l.as_str()) {
+            Some(k) if *k > 0 => *k -= 1,
+            _ => removed.push(l.clone()),
+        }
+    }
+    for l in new.iter().filter(|l| !l.trim().is_empty()) {
+        match o.get_mut(l.as_str()) {
+            Some(k) if *k > 0 => *k -= 1,
+            _ => added.push(l.clone()),
+        }
+    }
+    (removed, added)
+}
+
+/// Line-based three-way merge (see the module comment). `server` order is kept, added lines go last.
+pub fn merge3(base: &str, local: &str, server: &str) -> String {
+    let (removed, added) = line_diff(&lines(base), &lines(local));
+    let mut rm: HashMap<String, usize> = HashMap::new();
+    for l in removed {
+        *rm.entry(l).or_insert(0) += 1;
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut have: HashMap<String, usize> = HashMap::new();
+    for l in server.lines() {
+        if let Some(k) = rm.get_mut(l) {
+            if *k > 0 {
+                *k -= 1;
+                continue;
+            }
+        }
+        if !l.trim().is_empty() {
+            *have.entry(l.to_string()).or_insert(0) += 1;
+        }
+        out.push(l.to_string());
+    }
+    for l in added {
+        // the server already got the same line (added on both sides): do not duplicate it
+        if let Some(k) = have.get_mut(&l) {
+            if *k > 0 {
+                *k -= 1;
+                continue;
+            }
+        }
+        out.push(l);
+    }
+    let nl = if server.contains("\r\n") || (server.is_empty() && local.contains("\r\n")) { "\r\n" } else { "\n" };
+    let mut s = out.join(nl);
+    if !out.is_empty() {
+        s.push_str(nl);
+    }
+    s
+}
+
+pub struct Got {
+    pub text: String,
+    pub etag: Option<String>,
+    /// The text comes from the cache because the server is not reachable.
+    pub offline: bool,
+}
+
+/// Read a remote file; falls back to the cache while the server is unreachable.
+/// Pending offline changes are synced first when the server is back.
+pub fn get(server: &Server, url: &str) -> Result<Got, Error> {
+    let d = dir(url);
+    if d.join("local.txt").exists() {
+        return match sync(server, url, None)? {
+            Some(g) => Ok(g),
+            None => Ok(Got { text: read(&d, "local.txt").unwrap_or_default(), etag: base_etag(&d), offline: true }),
+        };
+    }
+    match webdav::get(server, url) {
+        Ok((text, etag)) => {
+            store_base(&d, url, &text, etag.as_deref());
+            set_offline(false);
+            Ok(Got { text, etag, offline: false })
+        }
+        Err(Error::Offline(m)) => {
+            set_offline(true);
+            match read(&d, "base.txt") {
+                Some(text) => Ok(Got { text, etag: base_etag(&d), offline: true }),
+                None => Err(Error::Offline(m)),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+pub struct Put {
+    pub etag: Option<String>,
+    /// Not written to the server (unreachable): kept locally and synced later.
+    pub offline: bool,
+    /// The server had changed meanwhile: the merged text that is now on the server.
+    pub merged: Option<String>,
+}
+
+/// Write a remote file (`etag` = version that was read). While the server is unreachable the text is kept
+/// as pending local version; a conflict with pending offline work is merged instead of refused.
+pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result<Put, Error> {
+    let d = dir(url);
+    if d.join("local.txt").exists() {
+        return match sync(server, url, Some(text))? {
+            Some(g) => Ok(Put { etag: g.etag, offline: false, merged: if g.text != text { Some(g.text) } else { None } }),
+            None => Ok(Put { etag: base_etag(&d), offline: true, merged: None }),
+        };
+    }
+    match webdav::put(server, url, text, etag) {
+        Ok(e) => {
+            store_base(&d, url, text, e.as_deref());
+            set_offline(false);
+            Ok(Put { etag: e, offline: false, merged: None })
+        }
+        Err(Error::Offline(_)) => {
+            write(&d, "local.txt", text);
+            write(&d, "url.txt", url);
+            set_offline(true);
+            Ok(Put { etag: etag.map(str::to_string), offline: true, merged: None })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Cheap change check. Also retries a pending sync. `Ok(None)` = unknown / not reachable (= no change).
+pub fn etag(server: &Server, url: &str) -> Result<Option<String>, Error> {
+    if pending(url) {
+        return Ok(sync(server, url, None)?.and_then(|g| g.etag));
+    }
+    match webdav::etag(server, url) {
+        Err(Error::Offline(_)) => {
+            set_offline(true);
+            Ok(None)
+        }
+        r => {
+            if r.is_ok() {
+                set_offline(false);
+            }
+            r
+        }
+    }
+}
+
+/// Push the pending local version (merging when the server changed). `Ok(None)` = still unreachable.
+fn sync(server: &Server, url: &str, local_override: Option<&str>) -> Result<Option<Got>, Error> {
+    let d = dir(url);
+    if let Some(t) = local_override {
+        write(&d, "local.txt", t);
+    }
+    let local = read(&d, "local.txt").unwrap_or_default();
+    let (stext, setag) = match webdav::get(server, url) {
+        Ok(x) => x,
+        Err(Error::NotFound) => (String::new(), None),
+        Err(Error::Offline(_)) => {
+            set_offline(true);
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    let base = read(&d, "base.txt").unwrap_or_default();
+    let merged = if stext == base || stext == local { local.clone() } else { merge3(&base, &local, &stext) };
+    let etag = if merged != stext {
+        match webdav::put(server, url, &merged, setag.as_deref()) {
+            Ok(e) => e,
+            Err(Error::Offline(_)) => {
+                set_offline(true);
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        }
+    } else {
+        setag
+    };
+    store_base(&d, url, &merged, etag.as_deref());
+    set_offline(false);
+    Ok(Some(Got { text: merged, etag, offline: false }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_keeps_both_sides() {
+        let base = "a\nb\nc\n";
+        let local = "a\nc\nlocal new\n"; // removed b, added "local new"
+        let server = "a\nb\nc\nserver new\n"; // added "server new"
+        assert_eq!(merge3(base, local, server), "a\nc\nserver new\nlocal new\n");
+    }
+
+    #[test]
+    fn merge_same_line_added_on_both_sides_once() {
+        assert_eq!(merge3("a\n", "a\nx\n", "a\nx\n"), "a\nx\n");
+    }
+
+    #[test]
+    fn diff_ignores_order() {
+        let (r, a) = line_diff(&lines("a\nb\n"), &lines("b\nc\na\n"));
+        assert!(r.is_empty());
+        assert_eq!(a, vec!["c".to_string()]);
+    }
+}

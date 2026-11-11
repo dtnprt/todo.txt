@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">"todo.txt"</string>
+    <string name="main_activity_title">"todo.txt"</string>
+</resources>

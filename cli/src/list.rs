@@ -45,9 +45,10 @@ impl Sort {
 #[derive(Default, Clone, Debug)]
 pub struct Filter {
     pub q: String,
-    pub project: Option<String>,
-    pub context: Option<String>,
-    pub priority: Option<char>,
+    /// Sidebar selections: several entries of one section match with OR, sections combine with AND.
+    pub project: Vec<String>,
+    pub context: Vec<String>,
+    pub priority: Vec<char>,
     /// Extra terms from a command-line filter expression; all must match.
     pub terms: Vec<String>,
 }
@@ -62,9 +63,9 @@ impl Filter {
 
     pub fn is_active(&self) -> bool {
         !self.q.trim().is_empty()
-            || self.project.is_some()
-            || self.context.is_some()
-            || self.priority.is_some()
+            || !self.project.is_empty()
+            || !self.context.is_empty()
+            || !self.priority.is_empty()
             || !self.terms.is_empty()
     }
 
@@ -87,20 +88,14 @@ impl Filter {
     }
 
     fn matches(&self, raw: &str, t: &Task) -> bool {
-        if let Some(p) = &self.project {
-            if !t.projects.contains(p) {
-                return false;
-            }
+        if !self.project.is_empty() && !self.project.iter().any(|p| t.projects.contains(p)) {
+            return false;
         }
-        if let Some(c) = &self.context {
-            if !t.contexts.contains(c) {
-                return false;
-            }
+        if !self.context.is_empty() && !self.context.iter().any(|c| t.contexts.contains(c)) {
+            return false;
         }
-        if let Some(p) = self.priority {
-            if t.priority != Some(p) {
-                return false;
-            }
+        if !self.priority.is_empty() && !t.priority.map_or(false, |p| self.priority.contains(&p)) {
+            return false;
         }
         if !self.terms.iter().all(|term| Filter::term_matches(term, raw, t)) {
             return false;
@@ -156,3 +151,6 @@ where
     }
     m.into_iter().collect()
 }
+
+/// Lines removed from / added to a list between two versions (order-independent).
+pub use crate::davcache::line_diff;
