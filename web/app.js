@@ -1148,6 +1148,13 @@ function renderTask({ i, t }, idx) {
 
 function render() {
   $('#fileName').textContent = state.fileName;
+  {
+    const dav = isTauri && isRemote(state.path);
+    const kind = dav ? ['cloud', 'WebDAV'] : (isTauri && state.git && state.git.repo ? ['code-branch', 'Git folder'] : ['hard-drive', 'Local file']);
+    const k = $('#fileKind');
+    k.className = `fa-solid fa-${kind[0]}`;
+    k.title = kind[1];
+  }
   renderFileList();
   $('#dirty').hidden = !state.dirty;
   $('#undo').disabled = !state.undo.length;
@@ -1461,24 +1468,37 @@ const composer = createComposer({
     input.setSelectionRange(caret, caret);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   };
-  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return T.isoDate(d); };
-  const btn = (label, title, onclick, cls = '') => {
+  const btn =(label, title, onclick, cls = '') => {
     const b = el('button', { type: 'button', className: `tb ${cls}`.trim(), title, onclick });
     b.append(...(Array.isArray(label) ? label : [label]));
     b.setAttribute('aria-label', title);
     return b;
   };
   const ic = (n) => el('i', { className: `fa-solid fa-${n}` });
+  // priority: one button that opens an overlay with the choices (fixed position, the bar scrolls and would clip it)
+  let prioPop = null;
+  const closePrio = () => { if (prioPop) { prioPop.remove(); prioPop = null; document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', onKey, true); } };
+  const outside = (e) => { if (prioPop && !prioPop.contains(e.target) && !e.target.closest('.tb-prio')) closePrio(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closePrio(); } };
+  const togglePrio = (anchor) => {
+    if (prioPop) { closePrio(); return; }
+    prioPop = el('div', { className: 'tb-pop', role: 'menu', 'aria-label': 'Priority' },
+      ...['A', 'B', 'C', 'D'].map((L) => btn(L, `Priority ${L}`, () => { setPrio(L); closePrio(); }, `tb-p tk-p${L}`)),
+      btn(ic('ban'), 'No priority', () => { setPrio(null); closePrio(); }, 'tb-p'));
+    prioPop.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+    document.body.append(prioPop);
+    const r = anchor.getBoundingClientRect();
+    const pr = prioPop.getBoundingClientRect();
+    prioPop.style.left = `${Math.max(4, Math.min(r.left, innerWidth - pr.width - 4))}px`;
+    prioPop.style.top = `${r.top - pr.height - 6 >= 4 ? r.top - pr.height - 6 : r.bottom + 6}px`;
+    document.addEventListener('mousedown', outside, true);
+    document.addEventListener('keydown', onKey, true);
+  };
   bar.append(
-    el('span', { className: 'tb-group', role: 'group', 'aria-label': 'Priority' },
-      ...['A', 'B', 'C', 'D'].map((L) => btn(L, `Priority ${L}`, () => setPrio(L), `tb-p tk-p${L}`)),
-      btn(ic('ban'), 'No priority', () => setPrio(null), 'tb-p')),
+    btn([ic('arrow-up-wide-short'), ' prio'], 'Priority', (e) => togglePrio(e.currentTarget), 'tb-w tb-prio'),
     btn([ic('folder-tree'), ' +'], 'Project (+name)', () => insert('+'), 'tb-w'),
     btn([ic('at'), ''], 'Context (@name)', () => insert('@'), 'tb-w'),
     btn([ic('calendar-day'), ' due'], 'Due date (opens the calendar)', () => insert('due:'), 'tb-w'),
-    btn('Today', 'due:today', () => insert(`due:${day(0)} `)),
-    btn('Tomorrow', 'due:tomorrow', () => insert(`due:${day(1)} `)),
-    btn('+1 week', 'due in a week', () => insert(`due:${day(7)} `)),
     btn([ic('note-sticky'), ' note'], 'Add a note', () => { insert('note:'); noteForInput(input); }, 'tb-w'),
     el('span', { className: 'spacer' }),
     el('button', { type: 'submit', className: 'tb tb-add', title: 'Add task (Enter)', 'aria-label': 'Add task' }, ic('plus'), ' Add'));
