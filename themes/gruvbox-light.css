@@ -1,0 +1,25 @@
+/* Gruvbox light */
+:root {
+  --bg: #fbf1c7;
+  --panel: #f2e5bc;
+  --hover: #ebdbb2;
+  --line: #d5c4a1;
+  --text: #3c3836;
+  --muted: #7c6f64;
+  --accent: #b57614;
+  --accent-text: #fbf1c7;
+  --danger: #9d0006;
+  --warn: #af3a03;
+  --ok: #79740e;
+  --pA: #9d0006;
+  --pB: #af3a03;
+  --pC: #b57614;
+  --pD: #79740e;
+  --pX: #928374;
+  --due-soon: #b57614;
+  --due-today: #af3a03;
+  --due-over: #9d0006;
+  color-scheme: light;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 16px;
+}

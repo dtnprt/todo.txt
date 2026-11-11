@@ -1,0 +1,25 @@
+/* Monokai */
+:root {
+  --bg: #272822;
+  --panel: #1e1f1c;
+  --hover: #3e3d32;
+  --line: #49483e;
+  --text: #f8f8f2;
+  --muted: #a59f85;
+  --accent: #a6e22e;
+  --accent-text: #272822;
+  --danger: #f92672;
+  --warn: #fd971f;
+  --ok: #a6e22e;
+  --pA: #f92672;
+  --pB: #fd971f;
+  --pC: #e6db74;
+  --pD: #66d9ef;
+  --pX: #75715e;
+  --due-soon: #e6db74;
+  --due-today: #fd971f;
+  --due-over: #f92672;
+  color-scheme: dark;
+  --font: 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, 'Courier New', monospace;
+  --font-size: 15px;
+}

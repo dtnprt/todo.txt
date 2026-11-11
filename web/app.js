@@ -34,6 +34,9 @@ const THEME_FAMILIES = {
   solarized: [['Dark', 'solarized-dark'], ['Light', 'solarized-light']],
   tokyonight: [['Night', 'tokyonight'], ['Storm', 'tokyonight-storm'], ['Day', 'tokyonight-day']],
   tomorrow: [['Night', 'tomorrow-night'], ['Day', 'tomorrow']],
+  gruvbox: [['Dark', 'gruvbox-dark'], ['Light', 'gruvbox-light']],
+  macos: [['Light', 'macos-light'], ['Dark', 'macos-dark']],
+  terminal: [['Green', 'terminal-green'], ['Amber', 'terminal-amber'], ['White', 'terminal-white']],
 };
 /** family key of a theme value ('nord-light' -> 'nord', 'user:x-dark' -> 'user:x', else the value itself) */
 function themeKey(t) {
@@ -1766,7 +1769,7 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game' };
+  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench' };
   const label = (key) => NICE[key.replace(/^user:/, '')] || key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];

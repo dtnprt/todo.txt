@@ -1,0 +1,25 @@
+/* Gruvbox dark */
+:root {
+  --bg: #282828;
+  --panel: #3c3836;
+  --hover: #504945;
+  --line: #665c54;
+  --text: #ebdbb2;
+  --muted: #a89984;
+  --accent: #fabd2f;
+  --accent-text: #282828;
+  --danger: #fb4934;
+  --warn: #fe8019;
+  --ok: #b8bb26;
+  --pA: #fb4934;
+  --pB: #fe8019;
+  --pC: #fabd2f;
+  --pD: #b8bb26;
+  --pX: #928374;
+  --due-soon: #fabd2f;
+  --due-today: #fe8019;
+  --due-over: #fb4934;
+  color-scheme: dark;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 16px;
+}
