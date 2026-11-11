@@ -450,3 +450,6 @@ body { overflow-x: clip; }
 
 .img-box { max-width: 92vw; max-height: 92vh; overflow: auto; }
 .img-view { display: block; max-width: 100%; height: auto; margin-top: 8px; }
+
+.set-pane select.variant-select { background: var(--panel); color: var(--text); border: 1.5px solid var(--accent); border-radius: 8px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer; }
+.set-pane select.variant-select option { background: var(--panel); color: var(--text); }

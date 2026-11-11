@@ -138,6 +138,7 @@ function restore() {
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
+    if (s.theme === 'nasa' || s.theme === 'user:nasa') s.theme = 'user:voyager-i';   // renamed
     if (s.theme === 'space' || s.theme === 'user:space') s.theme = 'user:space-game';   // renamed
     if (s.theme === 'lcars' || s.theme === 'user:lcars') s.theme = 'user:LCARS';   // renamed
     state.theme = isTauri && typeof s.theme === 'string' && s.theme ? (s.theme.startsWith('user:') ? s.theme : 'user:' + (s.theme === 'zelda' ? 'sheikah' : s.theme)) : '';
@@ -1847,7 +1848,7 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', 'space-invaders': 'Space Invaders', pipboy: 'Pip-Boy', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench' };
+  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', 'space-invaders': 'Space Invaders', pipboy: 'Pip-Boy', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench', 'voyager-i': 'Voyager I' };
   const label = (key) => NICE[key.replace(/^user:/, '')] || key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];
@@ -1855,14 +1856,14 @@ function buildThemeMenu() {
   vbox.replaceChildren();
   if (vars.length > 1) {   // variant switch of the chosen theme: a row of toggle buttons
     vbox.append(el('span', { className: 'variant-label', textContent: 'Variant' }));
-    const seg = el('div', { className: 'variant-seg', role: 'radiogroup', id: 'themeVariant' });
+    const sel = el('select', { id: 'themeVariant', className: 'variant-select', title: 'Theme variant' });
     for (const [l, v] of vars) {
-      const b = el('button', { type: 'button', role: 'radio', textContent: l, title: `Use the ${l} variant` });
-      b.setAttribute('aria-checked', String(v === state.theme));
-      b.onclick = () => { state.theme = v; persist(); render(); buildThemeMenu(); };
-      seg.append(b);
+      const o = el('option', { value: v, textContent: l });
+      o.selected = v === state.theme;
+      sel.append(o);
     }
-    vbox.append(seg);
+    sel.onchange = () => { state.theme = sel.value; persist(); render(); buildThemeMenu(); };
+    vbox.append(sel);
   }
   const add = (key, text) => {
     const b = el('button', { role: 'menuitemradio' }, el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' })), ' ' + text);
