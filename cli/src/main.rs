@@ -308,7 +308,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         }
         let _ = cfg.save(); // remembering the file is a convenience, never fatal
     }
-    if cfg.lastfile.as_ref() != Some(&path) {
+    // `lastfile=` is what the other clients follow: a one-off file (another folder, unknown to them) stays out of it
+    if !one_off && cfg.lastfile.as_ref() != Some(&path) {
         cfg.lastfile = Some(path.clone());
         let _ = cfg.save();
     }

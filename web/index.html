@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>todo.txt</title>
   <link rel="stylesheet" href="vendor/fa/css/all.min.css">
   <link rel="stylesheet" href="style.css">
@@ -53,6 +53,7 @@
       </div>
     </div>
     <div class="spacer"></div>
+    <button id="filterBtn" class="icon android-only" title="Filters" aria-label="Filters"><i class="fa-solid fa-filter" aria-hidden="true"></i></button>
     <button id="undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button>
     <button id="optBtn" class="icon" title="Settings" aria-label="Settings"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
     <span id="winCtl" class="win-ctl" hidden>
@@ -83,6 +84,7 @@
     </main>
   </div>
 
+  <div id="scrim" hidden></div>
   <div id="status" class="status"></div>
 
   <div id="settings" class="help settings" hidden>

@@ -268,6 +268,7 @@ body.minimal.show-bar .topbar { transform: none; }
 .status[hidden] { display: none; }
 .status-folder { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 0; max-width: 30%; }
 .status-folder.status-dav { max-width: 55%; }
+.diff-sort { color: var(--warn); }
 .status-offline { color: var(--warn); font-weight: 600; margin-right: 10px; white-space: nowrap; }
 @media (max-width: 700px) { .status-folder { display: none; } }
 .status-git { margin-right: auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
@@ -359,3 +360,39 @@ input, textarea, .note-field, .note-field * { -webkit-user-select: text; user-se
 .diff-line.add .diff-sign { color: var(--ok); }
 .diff-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .diff-actions .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+/* ---- Android app ---- */
+body:not(.android) .android-only { display: none !important; }
+body.android .android-only { display: inline-flex; }
+body.android { font-size: 16px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; overscroll-behavior: none; }
+body.android input, body.android textarea, body.android select { font-size: 16px; }   /* no zoom-in when focusing */
+/* desktop-only things: keyboard hints, folder mode, git, window options, file dialogs */
+body.android kbd, body.android #openFolder, body.android #gitDd, body.android #gitInit, body.android #framelessToggle,
+body.android #onTopToggle, body.android #minimalToggle, body.android #lineNoToggle, body.android #saveAs,
+body.android #keepFile, body.android #sideToggle, body.android #winCtl, body.android .task .grip { display: none !important; }
+body.android .topbar { padding: 6px 8px; gap: 4px; }
+body.android .topbar .icon, body.android .topbar .dd-btn { min-width: 44px; min-height: 44px; }
+body.android .file-btn h1 { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; }
+body.android .layout { padding: 6px 8px; display: block; }
+body.android .task { padding: 10px 4px; }
+body.android .task .actions { opacity: 1; }
+body.android .task .actions button, body.android .side-item, body.android .dd-menu button, body.android .set-pane button { min-height: 44px; }
+body.android .dd-menu { max-width: calc(100vw - 16px); }
+/* filters: a drawer from the left */
+body.android .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(82vw, 320px); max-height: none; overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 14px; z-index: 25; box-shadow: 0 0 30px rgba(0,0,0,.4); }
+body.android #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 24; }
+body.android .set-box, body.android .files-box { inset: 8px; }
+/* lists overlay */
+.files-box { display: flex; flex-direction: column; }
+.files-list { overflow: auto; flex: 1; min-height: 0; }
+.files-head { margin: 14px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.files-row { display: flex; align-items: center; gap: 4px; }
+.files-row.cur .files-open { font-weight: 600; color: var(--accent); }
+.files-open { flex: 1; text-align: left; border: 0; background: none; padding: 10px; border-radius: 6px; min-height: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-act { border: 0; background: none; width: 44px; height: 44px; border-radius: 6px; color: var(--muted); }
+.files-act.danger:hover { color: var(--danger); }
+.files-new { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.files-new input { flex: 1 1 140px; min-width: 0; }
+.files-new .primary, .files-pick button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.files-pick { position: absolute; left: 16px; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+.files-pick button { min-height: 44px; }

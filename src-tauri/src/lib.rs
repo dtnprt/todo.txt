@@ -3,6 +3,7 @@
 // note files (hidden-file filtering needs the Windows file attributes, which JS cannot see).
 
 // git support (pull / commit / push, .todo-git.cfg): the same code as the terminal app
+#[cfg(not(target_os = "android"))]
 #[path = "../../cli/src/git.rs"]
 mod git;
 
@@ -189,106 +190,112 @@ fn app_version() -> String {
     env!("TODO_VERSION_FULL").to_string()
 }
 
-#[derive(serde::Serialize)]
-struct GitInfo {
-    /// The folder is a git repository.
-    repo: bool,
-    /// `.todo-git.cfg` exists (without it no automatic git action happens).
-    configured: bool,
-    enabled: bool,
-    auto: bool,
-    pull: bool,
-    commit: bool,
-    push: bool,
-}
-
-fn git_info_of(dir: &str) -> GitInfo {
-    let d = Path::new(dir);
-    let repo = d.join(".git").exists();
-    match git::GitCfg::load(d) {
-        Some(c) => GitInfo { repo, configured: true, enabled: c.enabled, auto: c.auto, pull: c.pull, commit: c.commit, push: c.push },
-        None => GitInfo { repo, configured: false, enabled: false, auto: false, pull: false, commit: false, push: false },
-    }
-}
-
 /// git2 calls block, so they run on a worker thread.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-async fn git_info(dir: String) -> Result<GitInfo, String> {
-    blocking(move || git_info_of(&dir)).await
-}
 
-/// Change one setting of `.todo-git.cfg` (enabled, auto, pull, commit, push).
-#[tauri::command]
-async fn git_set(dir: String, key: String, on: bool) -> Result<GitInfo, String> {
-    blocking(move || {
-        let d = Path::new(&dir);
-        let mut c = git::GitCfg::load(d).ok_or("no .todo-git.cfg: initialize git first")?;
-        c.set(&key, on)?;
-        c.save(d).map_err(|e| e.to_string())?;
-        Ok::<GitInfo, String>(git_info_of(&dir))
-    })
-    .await?
-}
+#[cfg(not(target_os = "android"))]
+mod gitcmds {
+    use super::*;
+    #[derive(serde::Serialize)]
+    pub struct GitInfo {
+        /// The folder is a git repository.
+        repo: bool,
+        /// `.todo-git.cfg` exists (without it no automatic git action happens).
+        configured: bool,
+        enabled: bool,
+        auto: bool,
+        pull: bool,
+        commit: bool,
+        push: bool,
+    }
 
-/// Branch, current commit and working-tree state for the status bar (None: not a repository).
-#[tauri::command]
-async fn git_status(dir: String) -> Result<Option<GitStatus>, String> {
-    blocking(move || {
-        git::status(Path::new(&dir)).map(|s| GitStatus {
-            label: s.label(),
-            summary: s.summary,
-            branch: s.branch,
-            commit: s.commit,
-            changed: s.changed,
-            ahead: s.ahead,
-            behind: s.behind,
+    fn git_info_of(dir: &str) -> GitInfo {
+        let d = Path::new(dir);
+        let repo = d.join(".git").exists();
+        match git::GitCfg::load(d) {
+            Some(c) => GitInfo { repo, configured: true, enabled: c.enabled, auto: c.auto, pull: c.pull, commit: c.commit, push: c.push },
+            None => GitInfo { repo, configured: false, enabled: false, auto: false, pull: false, commit: false, push: false },
+        }
+    }
+
+    #[tauri::command]
+    pub async fn git_info(dir: String) -> Result<GitInfo, String> {
+        blocking(move || git_info_of(&dir)).await
+    }
+
+    /// Change one setting of `.todo-git.cfg` (enabled, auto, pull, commit, push).
+    #[tauri::command]
+    pub async fn git_set(dir: String, key: String, on: bool) -> Result<GitInfo, String> {
+        blocking(move || {
+            let d = Path::new(&dir);
+            let mut c = git::GitCfg::load(d).ok_or("no .todo-git.cfg: initialize git first")?;
+            c.set(&key, on)?;
+            c.save(d).map_err(|e| e.to_string())?;
+            Ok::<GitInfo, String>(git_info_of(&dir))
         })
-    })
-    .await
-}
+        .await?
+    }
 
-#[derive(serde::Serialize)]
-struct GitStatus {
-    /// Ready-made text for the status bar (same as the terminal app).
-    label: String,
-    summary: String,
-    branch: String,
-    commit: String,
-    changed: usize,
-    ahead: usize,
-    behind: usize,
-}
+    /// Branch, current commit and working-tree state for the status bar (None: not a repository).
+    #[tauri::command]
+    pub async fn git_status(dir: String) -> Result<Option<GitStatus>, String> {
+        blocking(move || {
+            git::status(Path::new(&dir)).map(|s| GitStatus {
+                label: s.label(),
+                summary: s.summary,
+                branch: s.branch,
+                commit: s.commit,
+                changed: s.changed,
+                ahead: s.ahead,
+                behind: s.behind,
+            })
+        })
+        .await
+    }
 
-#[tauri::command]
-async fn git_init(dir: String) -> Result<String, String> {
-    blocking(move || git::init(Path::new(&dir))).await?
-}
+    #[derive(serde::Serialize)]
+    pub struct GitStatus {
+        /// Ready-made text for the status bar (same as the terminal app).
+        label: String,
+        summary: String,
+        branch: String,
+        commit: String,
+        changed: usize,
+        ahead: usize,
+        behind: usize,
+    }
 
-/// Folder opened / app started: pull first (only with .todo-git.cfg: enabled, auto, pull).
-#[tauri::command]
-async fn git_start(dir: String) -> Result<String, String> {
-    blocking(move || git::auto_start(Path::new(&dir), false)).await?
-}
+    #[tauri::command]
+    pub async fn git_init(dir: String) -> Result<String, String> {
+        blocking(move || git::init(Path::new(&dir))).await?
+    }
 
-/// A file was saved: commit and push (in the background) as configured.
-#[tauri::command]
-async fn git_changed(dir: String, name: String) -> Result<String, String> {
-    blocking(move || git::auto_change(Path::new(&dir), &format!("todo: update {name}"), true, false)).await?
-}
+    /// Folder opened / app started: pull first (only with .todo-git.cfg: enabled, auto, pull).
+    #[tauri::command]
+    pub async fn git_start(dir: String) -> Result<String, String> {
+        blocking(move || git::auto_start(Path::new(&dir), false)).await?
+    }
 
-#[tauri::command]
-async fn git_sync(dir: String) -> Result<String, String> {
-    blocking(move || git::sync(Path::new(&dir), false)).await?
-}
+    /// A file was saved: commit and push (in the background) as configured.
+    #[tauri::command]
+    pub async fn git_changed(dir: String, name: String) -> Result<String, String> {
+        blocking(move || git::auto_change(Path::new(&dir), &format!("todo: update {name}"), true, false)).await?
+    }
 
-/// Outcome of the last background push, once.
-#[tauri::command]
-fn git_result() -> Option<String> {
-    git::take_result()
+    #[tauri::command]
+    pub async fn git_sync(dir: String) -> Result<String, String> {
+        blocking(move || git::sync(Path::new(&dir), false)).await?
+    }
+
+    /// Outcome of the last background push, once.
+    #[tauri::command]
+    pub fn git_result() -> Option<String> {
+        git::take_result()
+    }
+
 }
 
 // ---------------------------------------------------------------- WebDAV
@@ -424,39 +431,95 @@ async fn webdav_delete(entry: String, url: String) -> Result<(), String> {
     blocking(move || webdav::delete(&server(&entry)?, &url).map_err(|e| e.to_string())).await?
 }
 
+/// Move a file (copy + delete, so it also works between volumes such as the app storage and an SD card).
+#[tauri::command]
+fn move_file(from: String, to: String) -> Result<(), String> {
+    if Path::new(&to).exists() {
+        return Err(format!("{to} already exists"));
+    }
+    if let Some(dir) = Path::new(&to).parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::copy(&from, &to).map_err(|e| e.to_string())?;
+    fs::remove_file(&from).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    fs::remove_file(&path).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![
-            cfg_path,
-            list_txt_files,
-            read_note,
-            write_note,
-            delete_note,
-            list_user_themes,
-            export_themes,
-            app_version,
-            git_info,
-            git_status,
-            git_set,
-            git_init,
-            git_start,
-            git_changed,
-            git_sync,
-            git_result,
-            webdav_login,
-            webdav_logout,
-            webdav_has_password,
-            webdav_list,
-            webdav_get,
-            webdav_put,
-            webdav_etag,
-            webdav_state,
-            webdav_mkcol,
-            webdav_delete
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running the todo.txt application");
+        .setup(|app| {
+            // Android has no home folder: the private app folder plays that role (config, cache, credentials)
+            #[cfg(target_os = "android")]
+            {
+                use tauri::Manager;
+                let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+                let _ = fs::create_dir_all(&dir);
+                std::env::set_var("HOME", &dir);
+            }
+            let _ = app;
+            Ok(())
+        });
+    // no git on Android (the git commands do not exist there)
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+                cfg_path,
+                list_txt_files,
+                read_note,
+                write_note,
+                delete_note,
+                list_user_themes,
+                export_themes,
+                app_version,
+                move_file,
+                delete_file,
+                webdav_login,
+                webdav_logout,
+                webdav_has_password,
+                webdav_list,
+                webdav_get,
+                webdav_put,
+                webdav_etag,
+                webdav_state,
+                webdav_mkcol,
+                webdav_delete,
+                gitcmds::git_info,
+                gitcmds::git_status,
+                gitcmds::git_set,
+                gitcmds::git_init,
+                gitcmds::git_start,
+                gitcmds::git_changed,
+                gitcmds::git_sync,
+                gitcmds::git_result
+    ]);
+    #[cfg(target_os = "android")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+                cfg_path,
+                list_txt_files,
+                read_note,
+                write_note,
+                delete_note,
+                list_user_themes,
+                export_themes,
+                app_version,
+                move_file,
+                delete_file,
+                webdav_login,
+                webdav_logout,
+                webdav_has_password,
+                webdav_list,
+                webdav_get,
+                webdav_put,
+                webdav_etag,
+                webdav_state,
+                webdav_mkcol,
+                webdav_delete
+    ]);
+    builder.run(tauri::generate_context!()).expect("error while running the todo.txt application");
 }

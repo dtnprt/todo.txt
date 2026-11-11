@@ -2,6 +2,7 @@ import * as T from './todotxt.js';
 import { createComposer, attachHighlight, attachNoteHighlight, attachNoteTrigger, deleteWord, checkpoint, wordAt, dateAssist, replaceWordAt } from './composer.js';
 import { buildCalendar, parseIsoDate } from './calendar.js';
 import { createWebdav, isRemote, serverFor, davParent, davJoin, davName } from './webdav.js';
+import { isAndroid, storageDirs, openFiles, initBackButton } from './android.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE_KEY = 'todotxt.v1';
@@ -56,14 +57,14 @@ const state = {
   dirty: false,
   filter: { q: '', project: [], context: [], priority: [] },
   showDone: true,
-  sidebar: true,
+  sidebar: !isAndroid,   // Android: the filter drawer, closed at start
   calendar: true,
   minimal: false,
   statusBar: true,
-  touchBar: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,   // helper bar under the input (touch screens); Settings -> General
+  touchBar: isAndroid || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches),   // helper bar under the input (touch screens); Settings -> General
   onTop: false,         // desktop only (todo.cfg `ontop=`)
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
-  autoSave: false,     // desktop only; stored in todo.cfg
+  autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
   frameless: false,    // desktop only; stored in todo.cfg (`frameless=`)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
   sort: 'priority',
@@ -91,10 +92,10 @@ function restore() {
     state.fileName = s.fileName || 'todo.txt';
     state.dirty = !!s.dirty;
     state.path = isTauri && typeof s.path === 'string' ? s.path : null;
-    state.folder = isTauri && typeof s.folder === 'string' ? s.folder : null;
+    state.folder = isTauri && !isAndroid && typeof s.folder === 'string' ? s.folder : null;   // no folder mode on Android
     state.sort = s.sort || 'priority';
     state.showDone = s.showDone !== false;
-    state.sidebar = s.sidebar !== false;
+    state.sidebar = isAndroid ? false : s.sidebar !== false;
     state.calendar = s.calendar !== false;
     state.minimal = !!s.minimal;
     state.statusBar = s.statusBar !== false;
@@ -188,7 +189,8 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   state.undo = [];
   state.fileName = name;
   state.handle = handle;
-  if (isTauri && path && path !== state.path) setCfg('lastfile', path);   // shared with the CLI/TUI: the file used last is opened next time
+  // shared with the CLI/TUI: they follow the file chosen here - but not a file from a folder unknown to them
+  if (isTauri && path && path !== state.path) isKnownFile(path).then((k) => { if (k) setCfg('lastfile', path); });
   state.path = path;
   diskText = path || handle ? text : null;
   state.dirty = false;
@@ -439,6 +441,13 @@ async function openFromFileObject(file) {
 
 /** Save text under a user-chosen name. Resolves to false if the user cancelled. */
 async function download(name, text) {
+  if (isAndroid && state.path && !isRemote(state.path)) {
+    const p = state.path.replace(/[^/\\]*$/, '') + name;   // done.txt next to the list (appended)
+    let old = '';
+    try { old = await tauri.fs.readTextFile(p); } catch { /* new file */ }
+    await tauri.fs.writeTextFile(p, old + text);
+    return true;
+  }
   if (isTauri) {
     const p = await tauri.dialog.save({ defaultPath: name, filters: TXT_FILTER });
     if (!p) return false;
@@ -499,20 +508,25 @@ function lineDiff(oldLines, newLines) {
   const removed = [], added = [];
   for (const l of oldLines) { const k = n.get(l) || 0; if (k) n.set(l, k - 1); else removed.push(l); }
   for (const l of newLines) { const k = o.get(l) || 0; if (k) o.set(l, k - 1); else added.push(l); }
-  return { removed, added };
+  // the lines both versions have: in the same order? (the server list may simply be sorted differently)
+  const keep = (arr, other) => { const m = count(other); return arr.filter((l) => { const k = m.get(l) || 0; if (k) { m.set(l, k - 1); return true; } return false; }); };
+  const a = keep(oldLines, newLines), b = keep(newLines, oldLines);
+  const reordered = a.some((l, i) => l !== b[i]);
+  return { removed, added, reordered };
 }
 /**
  * Overlay with the difference between the local list and the version on the WebDAV server.
  * `ask`: there are unsaved local changes -> buttons "Load server version" / "Keep mine", resolves true = load.
  * Otherwise the server version was already loaded (undoable): informational, resolves on close.
  */
-function showServerDiff({ removed, added }, ask) {
+function showServerDiff({ removed, added, reordered }, ask) {
   return new Promise((resolve) => {
     const rows = (lines, cls, sign) => lines.map((l) => el('div', { className: 'diff-line ' + cls }, el('span', { className: 'diff-sign', textContent: sign }), el('span', { textContent: l })));
     const close = (v) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(v); };
     const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(false); } };
     const body = el('div', { className: 'diff-body' }, ...rows(removed, 'del', '−'), ...rows(added, 'add', '+'));
-    if (!removed.length && !added.length) body.append(el('div', { className: 'set-hint', textContent: 'Only the order of the lines changed.' }));
+    if (!removed.length && !added.length) body.append(el('div', { className: 'set-hint', textContent: 'No lines were added or removed.' }));
+    const sortNote = reordered ? el('div', { className: 'set-hint diff-sort', textContent: (removed.length || added.length ? 'The remaining lines are also sorted differently on the server.' : 'The lines are only sorted differently on the server.') }) : null;
     const buttons = ask
       ? [el('button', { type: 'button', className: 'primary', textContent: 'Load server version', onclick: () => close(true) }),
          el('button', { type: 'button', textContent: 'Keep mine', onclick: () => close(false) })]
@@ -523,7 +537,7 @@ function showServerDiff({ removed, added }, ask) {
         el('div', { className: 'set-hint', textContent: ask
           ? `${removed.length} line(s) removed, ${added.length} added there. You have unsaved changes: load the server version (discards them) or keep yours (saving overwrites the server).`
           : `${removed.length} line(s) removed, ${added.length} added. The server version was loaded (Undo restores yours).` }),
-        body, el('div', { className: 'diff-actions' }, ...buttons)));
+        ...(sortNote ? [sortNote] : []), body, el('div', { className: 'diff-actions' }, ...buttons)));
     document.addEventListener('keydown', onKey, true);
     document.body.append(ov);
     buttons[0].focus();
@@ -592,7 +606,36 @@ async function checkExternalChange(manual = false) {
     checking = false;
   }
 }
+/** The terminal app (or the CLI) switched to another known file: open it here too (not with unsaved changes). */
+let followBusy = false;
+async function followLastFile() {
+  if (!isTauri || followBusy || state.dirty || state.editing !== null) return;
+  followBusy = true;
+  try {
+    const cfg = await tauri.fs.readTextFile(await cfgPath());
+    const get = (k) => (cfg.match(new RegExp(`^\\s*${k}\\s*=\\s*(.+?)\\s*$`, 'm')) || [])[1];
+    const norm = (x) => (x || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const last = get('lastfile');
+    if (!last || norm(last) === norm(state.path)) return;
+    let files = [];
+    try { files = JSON.parse(get('files') || '[]'); } catch { /* ignore */ }
+    const folder = get('folder');
+    const inFolder = !!folder && norm(last).startsWith(norm(folder) + '/');
+    if (!(inFolder || files.some((f) => norm(f) === norm(last)) || norm(get('file')) === norm(last))) return;   // unknown file: not followed
+    const r = await readAny(last);
+    if (r.missing || state.dirty) return;
+    if (inFolder && norm(state.folder) !== norm(folder)) {
+      state.folder = folder; state.dirHandle = null;
+      await listFolder();
+    }
+    state.files = [...new Set([...state.files, ...files])];
+    loadText(r.text, davFileName(last), null, last, r.etag);
+    renderFileList();
+  } catch { /* config not readable right now */ } finally { followBusy = false; }
+}
+
 if (isTauri) {
+  setInterval(followLastFile, 1500);
   setInterval(checkExternalChange, 1500);
   setInterval(refreshFolder, 3000);
   setInterval(refreshGitStatus, 3000);
@@ -603,8 +646,14 @@ if (isTauri) {
 
 const cfgPath = () => invoke('cfg_path');   // ~/.todo.txt/todo.cfg (migrates the old ~/.config/todo.cfg)
 
-/** Set `key=value` in todo.cfg, keeping all other lines. */
-async function setCfg(key, value) {
+/** Set `key=value` in todo.cfg, keeping all other lines. Writes run one after the other, otherwise two
+ *  quick calls (e.g. `lastfile=` and `file=`) both read the old file and one of them gets lost. */
+let cfgQueue = Promise.resolve();
+function setCfg(key, value) {
+  cfgQueue = cfgQueue.then(() => setCfgNow(key, value));
+  return cfgQueue;
+}
+async function setCfgNow(key, value) {
   if (!isTauri || !tauri.path) return;
   try {
     const cp = await cfgPath();
@@ -615,6 +664,16 @@ async function setCfg(key, value) {
     lines.unshift(`${key}=${value}`);
     await tauri.fs.writeTextFile(cp, lines.join('\n') + '\n');
   } catch (e) { console.warn('Could not update todo.cfg:', e); }
+}
+
+/** A file the other clients know: in the files list, inside the configured folder, or next to the remembered file. */
+async function isKnownFile(p) {
+  if (!p) return false;
+  const norm = (x) => x.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  if (state.files.some((f) => norm(f) === norm(p))) return true;
+  if (state.folder && norm(p).startsWith(norm(state.folder) + '/')) return true;
+  const last = await cfgFile();
+  return !!last && dirOf(last) === dirOf(p);
 }
 
 const dirOf = (p) => p.replace(/\\/g, '/').replace(/\/[^/]*$/, '').toLowerCase();
@@ -637,6 +696,7 @@ async function rememberFile(path, force = false) {
     if (last && dirOf(last) !== dirOf(path)) return;
   }
   setCfg('file', path);
+  setCfg('lastfile', path);
   if (!state.files.includes(path)) {
     state.files.push(path);
     saveFiles();
@@ -745,7 +805,7 @@ async function loadAutoSave() {
       const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\S+)`, 'm'));
       return !!m && /^(true|1|yes|on)$/i.test(m[1]);
     };
-    state.autoSave = flag('autosave');
+    state.autoSave = /^\s*autosave\s*=/m.test(cfg) ? flag('autosave') : isAndroid;
     state.lineNumbers = flag('linenumbers');
     state.frameless = flag('frameless');
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
@@ -761,7 +821,7 @@ async function loadAutoSave() {
 async function openLastFile() {
   if (!isTauri || !tauri.path) return;
   try {
-    const home = (await tauri.path.homeDir()).replace(/[\\/]+$/, '');
+    const home = isAndroid ? (storageDirs()[0]?.path || '') : (await tauri.path.homeDir()).replace(/[\\/]+$/, '');
     let target = null;
     try {
       const cfg = await tauri.fs.readTextFile(await cfgPath());
@@ -772,7 +832,7 @@ async function openLastFile() {
       const wm = cfg.match(/^\s*webdav\s*=\s*(.+?)\s*$/m);
       if (wm) { try { const a = JSON.parse(wm[1]); if (Array.isArray(a)) davServers = a.filter((x) => typeof x === 'string' && x); } catch { /* ignore */ } }
       const dm = cfg.match(/^\s*folder\s*=\s*(.+?)\s*$/m);
-      if (dm) state.folder = dm[1];
+      if (dm && !isAndroid) state.folder = dm[1];
       const fm = cfg.match(/^\s*files\s*=\s*(.+?)\s*$/m);
       if (fm) {
         try {
@@ -808,6 +868,7 @@ ${e.message || e}`); continue; }
       loadText(r.text, davFileName(p), null, p, r.etag);
       return;
     }
+    if (isAndroid && home) await androidCreateFile(`${home}/todo.txt`);   // first start: an empty todo.txt in the app storage
   } catch (e) { console.warn('Could not open last file:', e); }
 }
 
@@ -1305,6 +1366,8 @@ function render() {
   const showSide = listMode && state.sidebar;
   $('#sidebar').hidden = !showSide;
   $('#layout').classList.toggle('no-side', !showSide);
+  document.body.classList.toggle('side-open', isAndroid && showSide);
+  $('#scrim').hidden = !(isAndroid && showSide);
   $('#sideToggle').setAttribute('aria-checked', state.sidebar);
   $('#sideToggle').disabled = !listMode;
   $('#status').hidden = !listMode;
@@ -1342,9 +1405,17 @@ function render() {
       textContent: 'offline' + (p ? ` · ${p[0] + p[1]} pending` : '') }));
   }
   if (state.path && isRemote(state.path)) {
-    let shown = state.path;
-    try { shown = decodeURI(state.path); } catch { /* keep raw */ }
-    status.append(el('span', { className: 'status-folder status-dav', title: shown, textContent: shown }));
+    let full = state.path;
+    try { full = decodeURI(state.path); } catch { /* keep raw */ }
+    // "server - folder/file": host of the server and the path below the server's base URL
+    let shown = full;
+    try {
+      const srv = serverFor(davServers, state.path);
+      const host = new URL(srv ? srv.url : state.path).hostname;
+      const base = srv ? decodeURI(srv.url) : `${new URL(state.path).origin}/`;
+      shown = `${host} - ${full.startsWith(base) ? full.slice(base.length) : decodeURI(new URL(state.path).pathname).replace(/^\/+/, '')}`;
+    } catch { /* keep the full address */ }
+    status.append(el('span', { className: 'status-folder status-dav', title: full, textContent: shown }));
   } else if (state.folder) {
     const base = state.folder.replace(/[\/]+$/, '').split(/[\/]/).pop() || state.folder;
     status.append(el('span', { className: 'status-folder', title: state.folder, textContent: base }));
@@ -1839,8 +1910,8 @@ document.addEventListener('mousedown', (e) => {
 $('#undo').onclick = undo;
 $('#openFolder').onclick = openFolder;
 $('#openDav').onclick = () => dav.openBrowser();
-$('#open').onclick = openFile;
-$('#new').onclick = () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };
+$('#open').onclick = isAndroid ? () => openFiles(androidDeps()) : openFile;
+$('#new').onclick = isAndroid ? () => openFiles(androidDeps(), { focusNew: true }) : () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };
 $('#save').onclick = () => save();
 $('#saveAs').onclick = () => save({ as: true });
 $('#keepFile').style.display = isTauri ? '' : 'none';
@@ -1963,5 +2034,48 @@ window.addEventListener('beforeunload', (e) => {
 restore();
 render();
 loadVersion();
+// ---------- Android: lists in the app storage / on the SD card, filter drawer, back button ----------
+async function androidCreateFile(path) {
+  let exists = true;
+  try { await tauri.fs.readTextFile(path); } catch { exists = false; }
+  if (!exists) await tauri.fs.writeTextFile(path, '');
+  state.dirty = false;
+  if (state.path === path) return;
+  loadText('', baseName(path), null, path);
+  rememberFile(path, true);
+}
+function androidDeps() {
+  const swap = (from, to) => { state.files = state.files.map((f) => (f === from ? to : f)).filter((f, i, a) => a.indexOf(f) === i); saveFiles(); };
+  return {
+    invoke, state, confirmDiscard,
+    switchFile: async (p) => { await switchFile(p); },
+    createFile: async (p) => { if (!confirmDiscard()) return; await androidCreateFile(p); },
+    onMoved: async (from, to, wasCurrent) => { swap(from, to); if (wasCurrent) { state.dirty = false; await switchFile(to); } },
+    onGone: async (path) => {
+      state.files = state.files.filter((f) => f !== path);
+      saveFiles();
+      if (path !== state.path) return;
+      state.dirty = false;
+      for (const d of storageDirs()) {
+        let names = [];
+        try { names = await invoke('list_txt_files', { dir: d.path }); } catch { /* ignore */ }
+        if (names.length) { await switchFile(`${d.path.replace(/\/+$/, '')}/${names[0]}`); return; }
+      }
+      const home = storageDirs()[0]?.path;
+      if (home) { state.path = null; await androidCreateFile(`${home}/todo.txt`); }
+    },
+  };
+}
+if (isAndroid) {
+  document.body.classList.add('android');
+  initBackButton();
+  $('#fileDd').addEventListener('click', (e) => {   // the title opens the lists overlay instead of the dropdown
+    if (!e.target.closest('.file-btn')) return;
+    e.stopPropagation(); closeMenus(); openFiles(androidDeps());
+  }, true);
+  $('#filterBtn').onclick = () => { state.sidebar = !state.sidebar; render(); };
+  $('#scrim').onclick = () => { state.sidebar = false; render(); };
+}
+
 openLastFile();
 loadAutoSave();

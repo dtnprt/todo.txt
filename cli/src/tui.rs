@@ -199,11 +199,13 @@ struct App {
     /// File content as last read or written, to notice changes made by other programs.
     disk_text: String,
     last_check: Instant,
+    /// When `todo.cfg` was last looked at for a file switch made by the desktop app / CLI.
+    cfg_checked: Instant,
     picker: Option<Picker>,
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
     /// "Changed on the server" popup (WebDAV): removed lines, added lines, scroll.
-    server_diff: Option<(Vec<String>, Vec<String>, usize)>,
+    server_diff: Option<(Vec<String>, Vec<String>, usize, bool)>,
     /// Note being edited in the popup (F7, or a `note:` typed into the bar).
     note_edit: Option<NoteEdit>,
     /// Name of the note being written for a `note:` typed into the bar (finishes the word afterwards).
@@ -243,6 +245,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         git_checked: Instant::now() - Duration::from_secs(60),
         disk_text,
         last_check: Instant::now(),
+        cfg_checked: Instant::now(),
         picker: None,
         git_menu: None,
         server_diff: None,
@@ -294,6 +297,9 @@ impl App {
             if self.git_checked.elapsed() >= Duration::from_secs(2) {
                 self.refresh_git_status();
             }
+            if self.cfg_checked.elapsed() >= Duration::from_secs(1) {
+                self.follow_lastfile();
+            }
             if self.last_check.elapsed() >= Duration::from_secs(if crate::webdav::is_remote(&self.path.to_string_lossy()) { 8 } else { 1 }) {
                 self.check_external();
             }
@@ -323,7 +329,8 @@ impl App {
                 let old = std::mem::replace(&mut self.store, new);
                 if crate::webdav::is_remote(&self.path.to_string_lossy()) {
                     let (removed, added) = list::line_diff(&old.lines, &self.store.lines);
-                    self.server_diff = Some((removed, added, 0));
+                    let sorted = list::reordered(&old.lines, &self.store.lines);
+                    self.server_diff = Some((removed, added, 0, sorted));
                 }
                 self.undo.push(old.lines);
                 if self.undo.len() > 200 {
@@ -348,7 +355,31 @@ impl App {
     }
 
     /// Open another todo.txt (`folder` = Some(dir) keeps / enters folder mode).
-    fn switch_file(&mut self, path: PathBuf, folder: Option<PathBuf>) {
+    /// The desktop app (or `todo -F`) switched to another *known* file: follow it. A file from a folder unknown
+    /// to the config (opened one-off) is never written to `lastfile=`, so it cannot pull this app away.
+    fn follow_lastfile(&mut self) {
+        self.cfg_checked = Instant::now();
+        if matches!(self.mode, Mode::Edit(_)) || self.picker.is_some() || self.note_edit.is_some() || self.git_menu.is_some() {
+            return;
+        }
+        let cfg = config::Config::load();
+        let Some(last) = cfg.lastfile.clone() else { return };
+        let norm = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+        if norm(&last) == norm(&self.path) {
+            return;
+        }
+        let in_folder = cfg.folder.as_ref().is_some_and(|d| folder::is_inside(d, &last));
+        let known = in_folder
+            || cfg.file.as_ref().is_some_and(|f| norm(f) == norm(&last))
+            || cfg.files.iter().any(|f| norm(f) == norm(&last));
+        if !known {
+            return;
+        }
+        let folder = if in_folder { cfg.folder.clone() } else { self.folder.clone().filter(|d| folder::is_inside(d, &last)) };
+        self.switch_file(last, folder, false);
+    }
+
+    fn switch_file(&mut self, path: PathBuf, folder: Option<PathBuf>, remember: bool) {
         // entering another folder: pull first (same as the desktop app), before the data is read
         if let Some(d) = folder.as_ref().filter(|d| self.folder.as_ref() != Some(*d)) {
             match git::auto_start(d, false) {
@@ -368,12 +399,14 @@ impl App {
                 self.mode = Mode::Add;
                 self.reload_view();
                 let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                let (p2, f2) = (path.clone(), folder.clone());
-                config::update(|c| {
-                    c.lastfile = Some(p2.clone());
-                    c.file = Some(p2);
-                    c.folder = f2;
-                });
+                if remember {
+                    let (p2, f2) = (path.clone(), folder.clone());
+                    config::update(|c| {
+                        c.lastfile = Some(p2.clone());
+                        c.file = Some(p2);
+                        c.folder = f2;
+                    });
+                }
                 self.path = path;
                 self.folder = folder;
                 self.msg = Some(format!("Opened {name}"));
@@ -511,7 +544,7 @@ impl App {
                 let remembered = self.path.clone();
                 self.picker = None;
                 let file = folder::pick_file(&dir, Some(&remembered));
-                self.switch_file(file, Some(dir));
+                self.switch_file(file, Some(dir), true);
             }
             KeyCode::Enter | KeyCode::Right => {
                 let Some(e) = pk.entries.get(pk.idx()) else { return };
@@ -539,7 +572,7 @@ impl App {
                         // staying in the folder keeps folder mode; a file elsewhere leaves it
                         let folder = if self.folder.as_deref() == Some(pk.dir.as_path()) { self.folder.clone() } else { None };
                         self.picker = None;
-                        self.switch_file(path, folder);
+                        self.switch_file(path, folder, true);
                     }
                     PKind::File => {}
                 }
@@ -1057,7 +1090,7 @@ impl App {
 
     fn on_key(&mut self, k: KeyEvent) {
         self.msg = None;
-        if let Some((rem, add, scroll)) = self.server_diff.as_mut() {
+        if let Some((rem, add, scroll, _)) = self.server_diff.as_mut() {
             let max = (rem.len() + add.len()).saturating_sub(1);
             match k.code {
                 KeyCode::Up => *scroll = scroll.saturating_sub(1),
@@ -1371,7 +1404,7 @@ impl App {
 
     /// Popup listing what changed on the WebDAV server (the new version was already loaded).
     fn draw_server_diff(&self, f: &mut Frame, area: Rect) {
-        let Some((rem, add, scroll)) = &self.server_diff else { return };
+        let Some((rem, add, scroll, sorted)) = &self.server_diff else { return };
         let w = 90.min(area.width.saturating_sub(2));
         let want = (rem.len() + add.len() + 4).max(6);
         let h = want.min(area.height.saturating_sub(2).max(6) as usize).min(area.height as usize) as u16;
@@ -1385,7 +1418,11 @@ impl App {
             lines.push(Line::from(Span::styled(format!("+ {l}"), Style::default().fg(Color::Green))));
         }
         if lines.is_empty() {
-            lines.push(Line::from(Span::styled("Only the order of the lines changed.", dim())));
+            lines.push(Line::from(Span::styled("No lines were added or removed.", dim())));
+        }
+        if *sorted {
+            let t = if rem.is_empty() && add.is_empty() { "The lines are only sorted differently on the server." } else { "The remaining lines are also sorted differently on the server." };
+            lines.insert(0, Line::from(Span::styled(t, Style::default().fg(Color::Yellow))));
         }
         let title = format!(" Changed on the server: {} removed, {} added ", rem.len(), add.len());
         let block = Block::default()
@@ -1672,12 +1709,13 @@ impl App {
         if crate::webdav::is_remote(&remote_path) {
             // WebDAV: show the full address on the left (shortened from the front when there is no room)
             let room = (cols[0].width as usize).saturating_sub(used + 4).min(cols[0].width as usize * 55 / 100);
-            let shown: String = if remote_path.width() > room {
+            let label = dav_label(&remote_path);
+            let shown: String = if label.width() > room {
                 let keep = room.saturating_sub(1);
-                let tail: String = remote_path.chars().rev().take(keep).collect::<Vec<_>>().into_iter().rev().collect();
+                let tail: String = label.chars().rev().take(keep).collect::<Vec<_>>().into_iter().rev().collect();
                 format!("…{tail}")
             } else {
-                remote_path.clone()
+                label
             };
             if room > 8 {
                 spans.push(Span::styled(format!(" {shown} "), dim()));
@@ -1846,6 +1884,38 @@ impl App {
         let lines: Vec<Line> = text.iter().map(|l| Line::from(*l)).collect();
         f.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Help ")), rect);
     }
+}
+
+/// "server - folder/file" for a WebDAV address: the host of the configured server and the path below its base URL.
+fn dav_label(url: &str) -> String {
+    let after_scheme = url.split_once("://").map_or(url, |x| x.1);
+    let (host, path) = after_scheme.split_once('/').unwrap_or((after_scheme, ""));
+    let base_path = crate::store::server_of(std::path::Path::new(url))
+        .ok()
+        .map(|s| s.url.split_once("://").map_or(s.url.clone(), |x| x.1.to_string()))
+        .and_then(|b| b.split_once('/').map(|x| x.1.to_string()))
+        .unwrap_or_default();
+    let rel = path.strip_prefix(&base_path).unwrap_or(path);
+    let rel = percent_decode(rel);
+    format!("{} - {}", host.split('@').last().unwrap_or(host).split(':').next().unwrap_or(host), rel)
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            if let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn days_in(year: i32, month: u32) -> u32 {

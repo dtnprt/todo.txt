@@ -68,12 +68,92 @@ pub mod cred {
         keyring::Entry::new(KEYRING_SERVICE, &server.entry()).map_err(|e| e.to_string())
     }
 
-    /// The stored password (keyring first, then `TODO_WEBDAV_PASSWORD`).
+    /// Android: no OS keyring. The passwords live in `~/.todo.txt/credentials.enc` (AES-256-GCM; `~` is the
+    /// private app folder), the random key in `credentials.key` next to it. Only this app can read them.
+    #[cfg(target_os = "android")]
+    mod encfile {
+        use aes_gcm::aead::{Aead, KeyInit};
+        use aes_gcm::{Aes256Gcm, Nonce};
+        use std::collections::BTreeMap;
+        use std::fs;
+        use std::path::PathBuf;
+
+        fn base() -> PathBuf {
+            std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join(".todo.txt")
+        }
+
+        fn hex(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+
+        fn unhex(s: &str) -> Option<Vec<u8>> {
+            if s.len() % 2 != 0 {
+                return None;
+            }
+            (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
+        }
+
+        fn key() -> Result<[u8; 32], String> {
+            let path = base().join("credentials.key");
+            if let Ok(k) = fs::read(&path) {
+                if k.len() == 32 {
+                    let mut a = [0u8; 32];
+                    a.copy_from_slice(&k);
+                    return Ok(a);
+                }
+            }
+            let mut k = [0u8; 32];
+            getrandom::getrandom(&mut k).map_err(|e| format!("random: {e}"))?;
+            fs::create_dir_all(base()).map_err(|e| e.to_string())?;
+            fs::write(&path, k).map_err(|e| e.to_string())?;
+            Ok(k)
+        }
+
+        pub fn load() -> BTreeMap<String, String> {
+            let mut out = BTreeMap::new();
+            let Ok(data) = fs::read(base().join("credentials.enc")) else { return out };
+            let Ok(k) = key() else { return out };
+            if data.len() < 13 {
+                return out;
+            }
+            let cipher = Aes256Gcm::new_from_slice(&k).expect("key length");
+            let Ok(plain) = cipher.decrypt(Nonce::from_slice(&data[..12]), &data[12..]) else { return out };
+            for line in String::from_utf8_lossy(&plain).lines() {
+                if let Some((a, b)) = line.split_once(' ') {
+                    if let (Some(a), Some(b)) = (unhex(a), unhex(b)) {
+                        out.insert(String::from_utf8_lossy(&a).into_owned(), String::from_utf8_lossy(&b).into_owned());
+                    }
+                }
+            }
+            out
+        }
+
+        pub fn save(map: &BTreeMap<String, String>) -> Result<(), String> {
+            let k = key()?;
+            let plain: String = map.iter().map(|(a, b)| format!("{} {}\n", hex(a.as_bytes()), hex(b.as_bytes()))).collect();
+            let mut nonce = [0u8; 12];
+            getrandom::getrandom(&mut nonce).map_err(|e| format!("random: {e}"))?;
+            let cipher = Aes256Gcm::new_from_slice(&k).expect("key length");
+            let ct = cipher.encrypt(Nonce::from_slice(&nonce), plain.as_bytes()).map_err(|e| format!("encrypt: {e}"))?;
+            let mut data = nonce.to_vec();
+            data.extend(ct);
+            fs::create_dir_all(base()).map_err(|e| e.to_string())?;
+            fs::write(base().join("credentials.enc"), data).map_err(|e| e.to_string())
+        }
+    }
+
+    /// The stored password (keyring / encrypted file first, then `TODO_WEBDAV_PASSWORD`).
     pub fn get(server: &Server) -> Result<String, String> {
         #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         {
             if let Ok(p) = entry(server).and_then(|e| e.get_password().map_err(|e| e.to_string())) {
                 return Ok(p);
+            }
+        }
+        #[cfg(target_os = "android")]
+        {
+            if let Some(p) = encfile::load().get(&server.entry()) {
+                return Ok(p.clone());
             }
         }
         std::env::var("TODO_WEBDAV_PASSWORD")
@@ -85,7 +165,13 @@ pub mod cred {
         {
             entry(server)?.set_password(password).map_err(|e| format!("keyring: {e}"))
         }
-        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        #[cfg(target_os = "android")]
+        {
+            let mut m = encfile::load();
+            m.insert(server.entry(), password.to_string());
+            encfile::save(&m)
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux", target_os = "android")))]
         {
             let _ = (server, password);
             Err("no keyring on this platform".into())
@@ -100,7 +186,13 @@ pub mod cred {
                 Err(e) => Err(format!("keyring: {e}")),
             }
         }
-        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        #[cfg(target_os = "android")]
+        {
+            let mut m = encfile::load();
+            m.remove(&server.entry());
+            encfile::save(&m)
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux", target_os = "android")))]
         {
             let _ = server;
             Ok(())

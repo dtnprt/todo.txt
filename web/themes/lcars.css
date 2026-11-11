@@ -21,6 +21,63 @@
   --pX: #9999cc;
   color-scheme: dark;
   --font: 'Antonio', 'Arial Narrow', sans-serif;
-  --bg-image: none;
   --font-size: 16px;
+}
+
+:root {
+  --lcars-lilac: #cc99cc;
+  --lcars-peach: #ffcc99;
+  --lcars-blue: #9999ff;
+  --lcars-purple: #9999cc;
+  --lcars-gold: #ff9966;
+  --lcars-orange: #ff9900;
+}
+
+/* Background images (from the original theme) */
+body.theme-lcars {
+  background: #000;
+  padding: 8.25rem 2.5rem 8.75rem 11.875rem;
+}
+
+body.theme-lcars::before {
+  content: "";
+  position: fixed;
+  inset: 0.875rem;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='100' viewBox='0 0 300 100'%3E%3Cpath d='M0 100 V56 A56 56 0 0 1 56 0 H300 V28 H172 A32 32 0 0 0 140 60 V100 Z' fill='%23ff9900'/%3E%3Ctext x='132' y='93' text-anchor='end' font-family='Arial Narrow, Arial, sans-serif' font-weight='700' font-size='15' fill='%23000000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
+    linear-gradient(90deg,
+      var(--lcars-lilac) 0 30%, transparent 30% calc(30% + 0.375rem),
+      var(--lcars-peach) calc(30% + 0.375rem) 62%, transparent 62% calc(62% + 0.375rem),
+      var(--lcars-blue) calc(62% + 0.375rem) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M0 0 H14 A14 14 0 0 1 14 28 H0 Z' fill='%239999ff'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(180deg,
+      var(--lcars-peach) 0 5.625rem, transparent 5.625rem 6rem,
+      var(--lcars-purple) 6rem 13.125rem, transparent 13.125rem 13.5rem,
+      var(--lcars-gold) 13.5rem 16.375rem, transparent 16.375rem 16.75rem,
+      var(--lcars-blue) 16.75rem 25rem, transparent 25rem 25.375rem),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='100' viewBox='0 0 300 100'%3E%3Cpath d='M0 0 V44 A56 56 0 0 0 56 100 H300 V72 H172 A32 32 0 0 1 140 40 V0 Z' fill='%23cc99cc'/%3E%3Ctext x='132' y='20' text-anchor='end' font-family='Arial Narrow, Arial, sans-serif' font-weight='700' font-size='15' fill='%23000000'%3E04-7715%3C/text%3E%3C/svg%3E"),
+    linear-gradient(90deg,
+      var(--lcars-purple) 0 18%, transparent 18% calc(18% + 0.375rem),
+      var(--lcars-orange) calc(18% + 0.375rem) 70%, transparent 70% calc(70% + 0.375rem),
+      var(--lcars-gold) calc(70% + 0.375rem) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M0 0 H14 A14 14 0 0 1 14 28 H0 Z' fill='%23ff9966'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position:
+    left top,
+    left 19.125rem top,
+    right top,
+    left 0 top 6.625rem,
+    left bottom,
+    left 19.125rem bottom,
+    right bottom;
+  background-size:
+    18.75rem 6.25rem,
+    calc(100% - 19.125rem - 1.25rem) 1.75rem,
+    1.75rem 1.75rem,
+    8.75rem calc(100% - 13.25rem),
+    18.75rem 6.25rem,
+    calc(100% - 19.125rem - 1.25rem) 1.75rem,
+    1.75rem 1.75rem;
 }

@@ -21,5 +21,16 @@
   --pX: #64748b;
   color-scheme: light;
   --font: Roboto, system-ui, sans-serif;
-  --bg-image: radial-gradient(ellipse 60% 50% at 0% 0%, rgba(56,189,248,.18), transparent 70%), radial-gradient(ellipse 50% 45% at 100% 20%, rgba(167,139,250,.14), transparent 70%);
+}
+
+/* Background images (from the original theme) */
+body.theme-light {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(circle, rgba(100, 116, 139, 0.18) 0.0625rem, transparent 0.0938rem),
+    radial-gradient(ellipse 60% 50% at 0% 0%, rgba(56, 189, 248, 0.18), transparent 70%),
+    radial-gradient(ellipse 50% 45% at 100% 20%, rgba(167, 139, 250, 0.14), transparent 70%),
+    radial-gradient(ellipse 70% 50% at 60% 100%, rgba(45, 212, 191, 0.14), transparent 70%);
+  background-size: 1.375rem 1.375rem, 100% 100%, 100% 100%, 100% 100%;
+  background-attachment: fixed;
 }

@@ -112,6 +112,27 @@ pub fn line_diff(old: &[String], new: &[String]) -> (Vec<String>, Vec<String>) {
     (removed, added)
 }
 
+/// Do the lines both versions have appear in a different order (the list is just sorted differently)?
+pub fn reordered(old: &[String], new: &[String]) -> bool {
+    fn common(a: &[String], b: &[String]) -> Vec<String> {
+        let mut m: HashMap<&str, usize> = HashMap::new();
+        for l in b.iter().filter(|l| !l.trim().is_empty()) {
+            *m.entry(l.as_str()).or_insert(0) += 1;
+        }
+        let mut out = Vec::new();
+        for l in a.iter().filter(|l| !l.trim().is_empty()) {
+            if let Some(k) = m.get_mut(l.as_str()) {
+                if *k > 0 {
+                    *k -= 1;
+                    out.push(l.clone());
+                }
+            }
+        }
+        out
+    }
+    common(old, new) != common(new, old)
+}
+
 /// Line-based three-way merge (see the module comment). `server` order is kept, added lines go last.
 pub fn merge3(base: &str, local: &str, server: &str) -> String {
     let (removed, added) = line_diff(&lines(base), &lines(local));
@@ -215,6 +236,23 @@ pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result
             set_offline(true);
             Ok(Put { etag: etag.map(str::to_string), offline: true, merged: None })
         }
+        Err(Error::Conflict) => {
+            // 412: really changed on the server - or the ETag only *looks* different (weak `W/` tags, `-gzip`
+            // suffixes, PUT and GET answering in another format). Compare the content: if the server still has
+            // exactly what we last saw, it is no conflict and the save goes through.
+            let same = match webdav::get(server, url) {
+                Ok((stext, _)) => read(&d, "base.txt").map_or(false, |b| b == stext),
+                Err(Error::NotFound) => false,
+                Err(e) => return Err(e),
+            };
+            if !same {
+                return Err(Error::Conflict);
+            }
+            let e = webdav::put(server, url, text, None)?;
+            store_base(&d, url, text, e.as_deref());
+            set_offline(false);
+            Ok(Put { etag: e, offline: false, merged: None })
+        }
         Err(e) => Err(e),
     }
 }
@@ -257,7 +295,12 @@ fn sync(server: &Server, url: &str, local_override: Option<&str>) -> Result<Opti
     let base = read(&d, "base.txt").unwrap_or_default();
     let merged = if stext == base || stext == local { local.clone() } else { merge3(&base, &local, &stext) };
     let etag = if merged != stext {
-        match webdav::put(server, url, &merged, setag.as_deref()) {
+        // a 412 right after the GET is an ETag format problem, not a concurrent change: retry unconditionally
+        let r = match webdav::put(server, url, &merged, setag.as_deref()) {
+            Err(Error::Conflict) => webdav::put(server, url, &merged, None),
+            other => other,
+        };
+        match r {
             Ok(e) => e,
             Err(Error::Offline(_)) => {
                 set_offline(true);

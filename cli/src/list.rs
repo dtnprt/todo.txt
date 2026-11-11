@@ -153,4 +153,4 @@ where
 }
 
 /// Lines removed from / added to a list between two versions (order-independent).
-pub use crate::davcache::line_diff;
+pub use crate::davcache::{line_diff, reordered};
