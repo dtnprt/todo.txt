@@ -207,8 +207,10 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .task:hover .slot .grip:not(.off) { display: block; }
 .task:hover .slot .grip:not(.off) ~ .lineno, .task:hover .slot:has(.grip:not(.off)) .lineno { visibility: hidden; }
 .task.dragging { opacity: .4; }
-.task.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.task.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* drop marker: a background gradient (not box-shadow) so themes that reset shadows or set them per due state cannot hide it */
+.task.drop-before, .task.drop-after { background-image: linear-gradient(var(--accent), var(--accent)) !important; background-repeat: no-repeat !important; background-size: 100% 3px !important; }
+.task.drop-before { background-position: 0 0 !important; }
+.task.drop-after { background-position: 0 100% !important; }
 
 /* highlighted edit field inside a task row */
 .field.edit-field { flex: none; width: 100%; height: 32px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; }
@@ -242,8 +244,6 @@ input[type=checkbox]:checked::after { visibility: visible; }
 .task.due-soon { box-shadow: inset 3px 0 0 var(--due-soon); }
 .task.due-today { box-shadow: inset 3px 0 0 var(--due-today); }
 .task.due-overdue { box-shadow: inset 3px 0 0 var(--due-over); }
-.task.due-soon.drop-before, .task.due-today.drop-before, .task.due-overdue.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.task.due-soon.drop-after, .task.due-today.drop-after, .task.due-overdue.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 
 /* note */
 .chip.note { color: var(--muted); font-size: 12px; }
@@ -439,7 +439,7 @@ body { overflow-x: clip; }
 /* theme tab footer: variant switch (left) and Reload button (right) under the theme list */
 .theme-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 4px 0; }
 .variant-box { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.variant-label { color: var(--muted); font-size: .9em; text-transform: uppercase; letter-spacing: .06em; }
+.variant-label { color: var(--text); font-size: 1em; font-family: inherit; }
 .variant-seg { display: inline-flex; border: 1.5px solid var(--accent); border-radius: 8px; overflow: hidden; }
 .set-pane .variant-seg button { border-radius: 0; padding: 7px 16px; background: var(--panel); color: var(--text); font-weight: 600; }
 .set-pane .variant-seg button + button { border-left: 1.5px solid var(--accent); }

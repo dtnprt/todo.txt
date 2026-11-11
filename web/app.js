@@ -1855,7 +1855,7 @@ function buildThemeMenu() {
   const vbox = $('#themeVariantBox');   // under the list, left of the Reload button
   vbox.replaceChildren();
   if (vars.length > 1) {   // variant switch of the chosen theme: a row of toggle buttons
-    vbox.append(el('span', { className: 'variant-label', textContent: 'Variant' }));
+    vbox.append(el('span', { className: 'variant-label', textContent: 'Variant:' }));
     const sel = el('select', { id: 'themeVariant', className: 'variant-select', title: 'Theme variant' });
     for (const [l, v] of vars) {
       const o = el('option', { value: v, textContent: l });
@@ -1894,6 +1894,8 @@ async function loadUserThemes() {
     const list = await invoke('list_user_themes');
     const next = Object.fromEntries(list.map(([n, css]) => [n, css]));
     if (JSON.stringify(next) === JSON.stringify(userThemes)) return;
+    const curName = String(state.theme || '').replace(/^user:/, '');
+    if (next[curName] !== userThemes[curName]) { const st = document.getElementById('themeStyle'); if (st) st.remove(); }   // the chosen theme file changed: re-inject
     userThemes = next;
     buildThemeMenu();
   } catch { /* no themes folder */ }
@@ -1909,6 +1911,9 @@ async function reloadTheme() {
   applyTheme();
 }
 $('#themeReload').onclick = reloadTheme;
+// Pick up new/changed theme files without a restart: on window focus and every 4 s while the settings are open.
+window.addEventListener('focus', () => { loadUserThemes(); });
+setInterval(() => { if (!settingsEl.hidden) loadUserThemes(); }, 4000);
 buildThemeMenu();
 loadUserThemes();
 // No browser context menu (right click) outside the input fields.
