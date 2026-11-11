@@ -44,14 +44,16 @@ body.theme-LCARS .topbar .dd > .dd-btn:not(.file-btn), body.theme-LCARS .topbar 
 }
 body.theme-LCARS .topbar > .dd:nth-of-type(3) > .dd-btn { background: var(--l-blue); }
 body.theme-LCARS .topbar > .dd:nth-of-type(4) > .dd-btn { background: var(--l-peach); }
-body.theme-LCARS .topbar > button.icon { background: var(--l-purple); border-radius: 6px 22px 22px 6px; }
+body.theme-LCARS .topbar > button.icon { background: var(--l-purple); border-radius: 6px; }
+body.theme-LCARS .topbar > #optBtn { border-radius: 22px 6px 6px 22px; }
 body.theme-LCARS .topbar button:hover:not(:disabled) { filter: brightness(1.15); }
 body.theme-LCARS .topbar button, body.theme-LCARS .topbar button i { color: #000; }
 
 /* ---- sidebar: stack of pills, count in the cap ---- */
 body.theme-LCARS .sidebar { background: transparent; border: 0; box-shadow: none; padding: 0; }
 body.theme-LCARS .side-item { background: var(--l-purple); color: #000; border-radius: 6px 20px 20px 6px; padding: 6px 14px; margin-bottom: 4px; min-height: 32px; flex-direction: row-reverse; gap: 12px; }
-body.theme-LCARS .side-item .n { color: #000; opacity: .65; }
+body.theme-LCARS .side-item, body.theme-LCARS .side-item span, body.theme-LCARS .side-item .n { color: #000 !important; }
+body.theme-LCARS .side-item .n { opacity: .65; }
 body.theme-LCARS .side-item:nth-of-type(4n+1) { background: var(--l-peach); }
 body.theme-LCARS .side-item:nth-of-type(4n+2) { background: var(--l-lilac); }
 body.theme-LCARS .side-item:nth-of-type(4n+3) { background: var(--l-blue); }
@@ -93,8 +95,8 @@ body.theme-LCARS .composer .tb { background: var(--l-purple); color: #000; borde
 body.theme-LCARS .composer .tb-add { background: var(--l-orange); border-radius: 6px 20px 20px 6px; }
 
 /* ---- status bar: lilac cap, text on black ---- */
-body.theme-LCARS .status { background: transparent; border: 0; color: var(--l-peach); }
-body.theme-LCARS .status::before { content: ""; flex: none; width: 70px; height: 18px; margin: 4px 0; background: var(--l-lilac); border-radius: 14px 4px 4px 14px; }
+body.theme-LCARS .status, body.theme-LCARS .status * { color: #000 !important; }
+body.theme-LCARS .status { background: var(--l-lilac); border: 0; }
 body.theme-LCARS .status button { background: var(--l-orange); color: #000; border: 0; border-radius: 999px; }
 
 /* ---- menus / popups ---- */
@@ -109,6 +111,6 @@ body.minimal.show-bar.theme-LCARS .topbar { transform: none; }
 
 /* window buttons (frameless mode): coloured pills, the close button red */
 body.theme-LCARS .win-ctl button { background: var(--l-peach); border: 0; border-radius: 999px; height: 40px; min-width: 40px; padding: 0 16px; box-sizing: border-box; font-size: 15px; }
-body.theme-LCARS .win-ctl button:nth-child(2) { background: var(--l-blue); }
-body.theme-LCARS .win-ctl button:last-child { background: var(--l-red); }
+body.theme-LCARS .win-ctl button:nth-child(1) { background: var(--l-blue); border-radius: 6px; }
+body.theme-LCARS .win-ctl button:last-child { background: var(--l-red); border-radius: 6px 22px 22px 6px; }
 body.theme-LCARS .win-ctl button, body.theme-LCARS .win-ctl button i { color: #000; }

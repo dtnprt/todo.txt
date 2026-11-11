@@ -1,7 +1,7 @@
 /* Ghibli - painted sky over a green meadow, white clouds, thatch-roof ochre and rusty-castle brown (palette from a Howl's Moving Castle still). System serif font, no embedded font. */
 :root {
   --bg: #7fc4ea;
-  --panel: rgba(255, 252, 240, .9);
+  --panel: rgba(255, 252, 240, .5);
   --hover: rgba(124, 194, 67, .22);
   --line: rgba(95, 130, 70, .35);
   --text: #2c3a22;
@@ -24,12 +24,12 @@
 }
 body { background-attachment: fixed; background-size: cover; background-position: center bottom; }
 
-.topbar, .status { background: rgba(255, 252, 240, .72); backdrop-filter: blur(6px); }
-.sidebar { background: rgba(255, 252, 240, .82); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 10px 28px -12px rgba(30, 60, 20, .45); }
+.topbar, .status { background: rgba(255, 252, 240, .5); backdrop-filter: blur(6px); }
+.sidebar { background: rgba(255, 252, 240, .5); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 10px 28px -12px rgba(30, 60, 20, .45); }
 .tasks, .composer-box, .dd-menu, .ac { backdrop-filter: blur(6px); border-color: var(--line); }
 .tasks { box-shadow: 0 10px 28px -12px rgba(30, 60, 20, .45); border-radius: 12px; }
-.composer-box { background: rgba(255, 252, 240, .45); border-radius: 12px; }
-input[type=text], input[type=search], select, textarea { background: rgba(255, 252, 240, .45); }
+.composer-box { background: rgba(255, 252, 240, .5); border-radius: 12px; }
+input[type=text], input[type=search], select, textarea { background: rgba(255, 252, 240, .5); }
 .dd-menu, .ac { background: #fffcf0; box-shadow: 0 8px 20px rgba(30, 60, 20, .28); border-radius: 10px; }
 .help-box { background: color-mix(in srgb, #fffcf0 94%, transparent); }
 button.primary { background: linear-gradient(90deg, #2f7fc4, #4a9ad8); color: #fff; border-color: transparent; }
