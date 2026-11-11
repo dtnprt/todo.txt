@@ -179,7 +179,7 @@ code.code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono
 
 /* priority dropdown in the task list: same look as the File/View dropdowns */
 .pri-dd { flex: none; }
-.pri-btn { min-width: 2.5em; padding: 2px 6px; text-align: center; border-radius: 2px; }
+.pri-dd .pri-btn, .pri-btn { box-sizing: border-box; min-width: 2.2em; width: 2.2em; height: 2.2em; padding: 0; line-height: 1; display: inline-flex; align-items: center; justify-content: center; text-align: center; border-radius: 7px; border-color: color-mix(in srgb, var(--line) 40%, transparent); }
 .pri-btn:disabled { opacity: .4; cursor: default; }
 .pri-menu { min-width: 0; width: max-content; max-height: 280px; overflow-y: auto; }
 .pri-menu button { padding-right: 18px; }
@@ -429,3 +429,4 @@ body.android .sidebar { margin-left: 0; }
 /* no horizontal scrolling of the page */
 html { overflow-x: hidden; }
 body { overflow-x: clip; }
+.status-hover { margin-left: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }

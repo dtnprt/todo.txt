@@ -33,90 +33,51 @@
   --lcars-orange: #ff9900;
 }
 
-/* LCARS frame drawn with plain CSS: orange elbow + bar on top (the top bar sits in it), colour blocks in the left column
-   (the sidebar sits between the elbow and the blocks), status bar in the bottom band. --col = width of the left column. */
-body.theme-lcars {
-  --col: 140px;
-  --lcars-blocks-tall: 0;
-  background: #000;
-  padding: 100px 22px 50px calc(14px + var(--col) + 24px);
-}
+/* LCARS: orange top bar, entries as pills (coloured round cap with the checkbox + dark body) */
+body.theme-lcars { background: #000; }
+body.theme-lcars .topbar { background: var(--lcars-orange); color: #000; border: 0; border-radius: 999px; padding: 8px 28px; margin: 8px 12px 0; top: 8px; }
+body.theme-lcars .topbar h1, body.theme-lcars .topbar .file-name, body.theme-lcars .topbar #fileKind { color: #000; text-transform: uppercase; letter-spacing: .08em; }
+body.theme-lcars .topbar button { color: #000; background: transparent; border-color: transparent; text-transform: uppercase; letter-spacing: .06em; border-radius: 17px; }
+body.theme-lcars .topbar button:hover { background: rgba(0,0,0,.18); }
+body.theme-lcars .status { background: var(--lcars-lilac); color: #000; border: 0; border-radius: 14px 14px 0 0; }
+body.theme-lcars .status button { color: #000; }
 
-/* left column: elbow, label, blocks (bottom up: lilac, purple, peach, blue) */
-body.theme-lcars::before {
-  content: "";
-  position: fixed;
-  left: 14px; top: 14px; bottom: 14px;
-  width: var(--col);
-  z-index: -2;
-  pointer-events: none;
-  border-radius: 70px 0 0 44px;
-  background-repeat: no-repeat;
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3E04-7715%3C/text%3E%3C/svg%3E"),
-    linear-gradient(var(--lcars-orange), var(--lcars-orange)),
-    linear-gradient(var(--lcars-lilac), var(--lcars-lilac)),
-    linear-gradient(var(--lcars-purple), var(--lcars-purple));
-  background-position: left 0 top 76px, left 0 bottom 65px, left top, left bottom, left 0 bottom 93px;
-  background-size: 140px 20px, 140px 20px, 100% 101px, 100% 87px, 100% 75px;
+body.theme-lcars .tasks { background: transparent; border: 0; border-radius: 0; display: flex; flex-direction: column; gap: 8px; }
+body.theme-lcars .task {
+  --cap: var(--lcars-peach);
+  border: 0; border-radius: 35px 10px 10px 35px; min-height: 44px;
+  padding: 8px 12px 8px 70px; position: relative;
+  background: var(--panel);
+  text-transform: uppercase; letter-spacing: .08em; color: var(--text);
 }
+body.theme-lcars .task::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 56px;
+  background: var(--cap); border-radius: 35px 0 0 35px; z-index: 0;
+}
+body.theme-lcars .task > * { position: relative; z-index: 1; }
+body.theme-lcars .task > .slot, body.theme-lcars .task > input[type=checkbox] { position: absolute; z-index: 1; }
+body.theme-lcars .task > input[type=checkbox] { left: 20px; top: 50%; transform: translateY(-50%); }
+body.theme-lcars .task > .slot { left: 4px; width: 48px; text-align: center; top: 50%; transform: translateY(-50%); color: #000; }
+body.theme-lcars .task .lineno, body.theme-lcars .task .slot * { color: #000 !important; }
+body.theme-lcars .task:nth-child(6n+1) { --cap: #ffaa90; }
+body.theme-lcars .task:nth-child(6n+2) { --cap: #ff8855; }
+body.theme-lcars .task:nth-child(6n+3) { --cap: #ffcc66; }
+body.theme-lcars .task:nth-child(6n+4) { --cap: #cc99cc; }
+body.theme-lcars .task:nth-child(6n+5) { --cap: #9999ff; }
+body.theme-lcars .task:nth-child(6n) { --cap: #99dd99; }
+body.theme-lcars .task:hover { background: var(--hover); }
+body.theme-lcars .task.done { opacity: .6; }
+body.theme-lcars .task.due-soon, body.theme-lcars .task.due-today, body.theme-lcars .task.due-overdue { box-shadow: none; }
 
-/* top bar (orange) with the concave corner where the content area begins */
-body.theme-lcars::after {
-  content: "";
-  position: fixed;
-  left: calc(14px + var(--col)); right: 14px; top: 14px; height: 101px;
-  z-index: -2;
-  pointer-events: none;
-  background-repeat: no-repeat;
-  background-image:
-    linear-gradient(var(--lcars-orange), var(--lcars-orange)),
-    radial-gradient(circle at 100% 100%, transparent 29px, var(--lcars-orange) 30px);
-  background-position: left top, left 0 top 71px;
-  background-size: 100% 71px, 30px 30px;
-}
-@media (min-height: 780px) {
-  body.theme-lcars::before {
-    background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3ELCARS 26-1105%3C/text%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='20'%3E%3Ctext x='132' y='15' text-anchor='end' font-family='Arial,sans-serif' font-weight='bold' font-size='13' fill='%23000'%3E04-7715%3C/text%3E%3C/svg%3E"),
-      linear-gradient(var(--lcars-orange), var(--lcars-orange)),
-      linear-gradient(var(--lcars-lilac), var(--lcars-lilac)),
-      linear-gradient(var(--lcars-purple), var(--lcars-purple)),
-      linear-gradient(var(--lcars-peach), var(--lcars-peach)),
-      linear-gradient(var(--lcars-blue), var(--lcars-blue));
-    background-position: left 0 top 76px, left 0 bottom 65px, left top, left bottom, left 0 bottom 93px, left 0 bottom 174px, left 0 bottom 270px;
-    background-size: 140px 20px, 140px 20px, 100% 101px, 100% 87px, 100% 75px, 100% 90px, 100% 119px;
-  }
-  body.theme-lcars { --lcars-blocks-tall: 1; }
-}
+body.theme-lcars .sidebar .side-item { border-radius: 14px 4px 4px 14px; text-transform: uppercase; letter-spacing: .06em; }
+body.minimal.theme-lcars .topbar { border-radius: 999px; }
 
-/* the three bars live inside the frame */
-body.theme-lcars .topbar { position: fixed; top: 22px; left: calc(14px + var(--col) + 16px); right: 22px; border: 1px solid var(--line); border-radius: 8px; }
-body.theme-lcars .status { left: calc(14px + var(--col) + 16px); right: 14px; bottom: 14px; width: auto; border: 1px solid var(--line); border-radius: 6px; line-height: 26px; }
-body.theme-lcars .composer { bottom: 50px; }
-body.minimal.theme-lcars .topbar { opacity: 0; pointer-events: none; transform: none; box-shadow: none; transition: opacity .15s; }
-body.minimal.show-bar.theme-lcars .topbar { opacity: 1; pointer-events: auto; }
-body.minimal.theme-lcars, body.nostatus.theme-lcars { padding-bottom: 22px; }
-body.minimal.theme-lcars .composer, body.nostatus.theme-lcars .composer { bottom: 22px; }
-
-@media (min-width: 721px) {
-  /* sidebar inside the left column, entries and input to the right of it */
-  body.theme-lcars { padding-left: 22px; }
-  body.theme-lcars .layout { grid-template-columns: calc(var(--col) - 8px) minmax(0, 1fr); column-gap: 24px; padding: 0; }
-  body.theme-lcars .layout.no-side { grid-template-columns: minmax(0, 1fr); padding-left: calc(14px + var(--col) + 2px); }
-  body.theme-lcars .layout.no-side #list, body.theme-lcars .layout.no-side #raw { grid-column: 1; }
-  body.theme-lcars .composer { grid-column: 2; margin-left: 0; }
-  body.theme-lcars .layout.no-side .composer { grid-column: 1; }
-  body.theme-lcars .sidebar { margin: 22px 0 0; top: 115px; max-height: calc(100vh - 115px - 14px - 168px - 8px); }
-  body.theme-lcars.nostatus .sidebar, body.minimal.theme-lcars .sidebar { top: 115px; max-height: calc(100vh - 115px - 14px - 168px - 8px); }
-}
-@media (min-width: 721px) and (min-height: 780px) {
-  body.theme-lcars .sidebar, body.theme-lcars.nostatus .sidebar, body.minimal.theme-lcars .sidebar { max-height: calc(100vh - 115px - 14px - 389px - 8px); }
-}
-@media (max-width: 720px) {
-  body.theme-lcars { --col: 40px; }
-  body.theme-lcars::before { background-image: linear-gradient(var(--lcars-orange), var(--lcars-orange)), linear-gradient(var(--lcars-lilac), var(--lcars-lilac)); background-position: left top, left bottom; background-size: 100% 101px, 100% 87px; }
-  body.theme-lcars::after { left: calc(14px + var(--col)); }
-}
+/* minimal mode: slide the bar fully out (margin + offset included) */
+body.minimal.theme-lcars .topbar { top: 0; left: 0; right: 0; transform: translateY(calc(-100% - 24px)); box-shadow: none; }
+body.minimal.show-bar.theme-lcars .topbar { transform: translateY(8px); }
+/* line numbers: own place in the cap, left of the checkbox */
+body.theme-lcars .task:has(.lineno) { padding-left: 104px; }
+body.theme-lcars .task:has(.lineno)::before { width: 90px; }
+body.theme-lcars .task:has(.lineno) > .slot { left: 10px; width: 36px; }
+body.theme-lcars .task:has(.lineno) > input[type=checkbox] { left: 54px; }
+body.theme-lcars .task .lineno { font-size: 14px; font-weight: 700; }

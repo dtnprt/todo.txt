@@ -19,8 +19,8 @@ const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
 const baseName = (p) => p.split(/[\\/]/).pop();
 
 // One theme = one CSS file in web/themes/NAME.css (body class `theme-NAME`). To add a theme: drop the file there and add its name here.
-const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'ghibli', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'sheikah', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night'];
-// Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
+const THEMES = [];   // built-in themes were moved out of web/: see themes/ (bundled with the desktop app, loaded like own themes)
+// Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as themes/*.css in the repo. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
 const themeClass = (t) => 'theme-' + t.replace(/^user:/, '').replace(/[^\w-]/g, '-');   // own themes use the same body class as the built-in one of that name (their artwork is `body.theme-NAME`)
 // Theme families: the list shows only the family name, the variant (light/dark/...) is chosen in a second dropdown.
@@ -66,11 +66,12 @@ function applyTheme() {
   const want = state.theme && !user ? `themes/${state.theme}.css` : '';
   if (!want) { link?.remove(); }
   else if (!link) { link = el('link', { id: 'themeLink', rel: 'stylesheet', href: want }); document.head.append(link); }
-  else if (link.getAttribute('href') !== want) link.setAttribute('href', want);
+  else if (link.getAttribute('href').split('?')[0] !== want) link.setAttribute('href', want);
   document.body.className = document.body.className.split(/\s+/).filter((c) => c && !c.startsWith('theme-')).concat(state.theme ? [themeClass(state.theme)] : []).join(' ');
   document.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.theme === themeKey(state.theme))));
 }
 
+let statusHover = null;   // status bar span showing the dates of the hovered entry
 const state = {
   lines: [],
   undo: [],
@@ -97,6 +98,7 @@ const state = {
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
   autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
   frameless: false,    // desktop only; stored in todo.cfg (`frameless=`)
+  showDates: false,    // show created/done dates inside the entries (else only tooltip + status bar on hover)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
   sort: 'priority',
   view: 'list',
@@ -109,7 +111,7 @@ function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       lines: state.lines, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
-      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, theme: state.theme,
+      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, showDates: state.showDates, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
@@ -131,8 +133,9 @@ function restore() {
     state.minimal = !!s.minimal;
     state.statusBar = s.statusBar !== false;
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
+    if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
-    state.theme = THEMES.includes(s.theme) || (isTauri && typeof s.theme === 'string' && s.theme.startsWith('user:')) ? s.theme : '';
+    state.theme = isTauri && typeof s.theme === 'string' && s.theme ? (s.theme.startsWith('user:') ? s.theme : 'user:' + (s.theme === 'zelda' ? 'sheikah' : s.theme)) : '';
   } catch { /* corrupted: start empty */ }
 }
 
@@ -843,6 +846,7 @@ async function loadAutoSave() {
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
     state.onTop = flag('ontop');
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
+    if (/^\s*showdates\s*=/m.test(cfg)) state.showDates = flag('showdates');
     if (/^\s*statusbar\s*=/m.test(cfg)) state.statusBar = flag('statusbar');   // shared with the terminal app
   } catch { /* no config yet: off */ }
   render();
@@ -1308,7 +1312,12 @@ function renderTask({ i, t }, idx) {
   } else {
     body.append(renderText(t, i));
     const dates = [t.created && `created ${t.created}`, t.completed && `done ${t.completed}`].filter(Boolean);
-    if (dates.length) body.append(el('span', { className: 'dates', textContent: dates.join(' · ') }));
+    if (dates.length && state.showDates) body.append(el('span', { className: 'dates', textContent: dates.join(' · ') }));
+    else if (dates.length) {   // hidden: tooltip + status bar while hovering
+      body.title = dates.join(' · ');
+      li.addEventListener('mouseenter', () => { if (statusHover) statusHover.textContent = dates.join(' · '); });
+      li.addEventListener('mouseleave', () => { if (statusHover) statusHover.textContent = ''; });
+    }
     body.ondblclick = (e) => {
       if (e.target.closest('button, a')) return;
       state.editing = i;
@@ -1367,6 +1376,7 @@ function render() {
   $('#minimalToggle').setAttribute('aria-checked', state.minimal);
   $('#statusToggle').setAttribute('aria-checked', state.statusBar);
   $('#touchToggle').setAttribute('aria-checked', state.touchBar);
+  $('#datesToggle').setAttribute('aria-checked', state.showDates);
   $('#touchBar').hidden = !state.touchBar || state.view === 'text';
   document.body.classList.toggle('minimal', state.minimal);
   document.body.classList.toggle('nostatus', !state.statusBar);
@@ -1456,7 +1466,8 @@ function render() {
   if (gs) {
     status.append(el('span', { className: 'status-git' + (gs.changed ? ' dirty' : ' clean'), title: gs.summary ? `${gs.commit}: ${gs.summary}` : 'git', textContent: 'git: ' + gs.label }));
   }
-  status.append(right);
+  statusHover = el('span', { className: 'status-hover' });
+  status.append(statusHover, right);
   if (!items.length) {
     list.replaceChildren(el('li', { className: 'empty', textContent: state.lines.length ? 'No tasks match.' : 'No tasks yet. Add one above, or open a todo.txt file.' }));
   }
@@ -1753,7 +1764,7 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const label = (key) => key === 'grand-theft-six' ? 'Grand Theft Six' : key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
+  const label = (key) => key.replace(/^user:/, '') === 'grand-theft-six' ? 'Grand Theft Six' : key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];
   if (vars.length > 1) {   // variant dropdown of the chosen theme
@@ -1776,33 +1787,13 @@ function buildThemeMenu() {
   for (const key of keys) add(key, key ? label(key) : 'Default (system light/dark)');
   const own = [...new Set(Object.keys(userThemes).sort().map((n) => themeKey('user:' + n)))];
   if (own.length) {
-    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Own themes (~/.todo.txt/themes)' }));
+    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Themes (bundled themes folder, ~/.todo.txt/themes overrides)' }));
     for (const k of own) add(k, label(k));
   } else if (isTauri) {
-    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Put your own NAME.css in ~/.todo.txt/themes to add a theme (NAME-light.css / NAME-dark.css give a variant dropdown).' }));
-  }
-  if (isTauri) {
-    const ex = el('button', { type: 'button', className: 'theme-export', title: 'Write all built-in themes as NAME.css into ~/.todo.txt/themes (existing files are kept) so you can edit them' },
-      el('i', { className: 'fa-solid fa-file-export' }), ' Export all themes to the themes folder');
-    ex.onclick = exportThemes;
-    menu.append(ex);
+    menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'No themes found. Put NAME.css files in a themes folder next to the program or in ~/.todo.txt/themes (NAME-light.css / NAME-dark.css give a variant dropdown).' }));
   }
   applyTheme();
   menu.scrollTop = keepScroll;
-}
-/** Desktop: write every built-in theme to ~/.todo.txt/themes/NAME.css (never overwrites an existing file). */
-async function exportThemes() {
-  try {
-    const files = [];
-    for (const name of THEMES) {
-      const r = await fetch(`themes/${name}.css`);
-      if (r.ok) files.push([name, await r.text()]);
-    }
-    const [written, kept] = await invoke('export_themes', { files });
-    userThemes = {};
-    await loadUserThemes();
-    alert(`Themes exported to ~/.todo.txt/themes: ${written} written, ${kept} already there (kept).`);
-  } catch (e) { alert(`Export failed: ${e.message || e}`); }
 }
 /** (Re)read the own themes (desktop); called at start and whenever the settings open. */
 async function loadUserThemes() {
@@ -1815,6 +1806,17 @@ async function loadUserThemes() {
     buildThemeMenu();
   } catch { /* no themes folder */ }
 }
+/** Re-read the chosen theme from disk/server (bundled themes folder and ~/.todo.txt/themes). */
+async function reloadTheme() {
+  if (isTauri) {
+    try { userThemes = Object.fromEntries((await invoke('list_user_themes')).map(([n, css]) => [n, css])); } catch { /* no themes folder */ }
+    const st = document.getElementById('themeStyle');
+    if (st) st.remove();   // force re-injection
+  }
+  buildThemeMenu();
+  applyTheme();
+}
+$('#themeReload').onclick = reloadTheme;
 buildThemeMenu();
 loadUserThemes();
 // No browser context menu (right click) outside the input fields.
@@ -1838,6 +1840,7 @@ $('#showDone').onclick = () => { state.showDone = !state.showDone; persist(); re
 $('#viewToggle').onclick = () => { state.view = state.view === 'list' ? 'text' : 'list'; render(); };
 $('#statusToggle').onclick = () => { state.statusBar = !state.statusBar; if (isTauri) setCfg('statusbar', state.statusBar); persist(); render(); };
 $('#minimalToggle').onclick = () => { state.minimal = !state.minimal; persist(); render(); };
+$('#datesToggle').onclick = () => { state.showDates = !state.showDates; if (isTauri) setCfg('showdates', state.showDates); persist(); render(); };
 $('#touchToggle').onclick = () => { state.touchBar = !state.touchBar; if (isTauri) setCfg('touchbar', state.touchBar); persist(); render(); };
 $('#calToggle').onclick = () => { state.calendar = !state.calendar; persist(); render(); };
 $('#autoSaveToggle').onclick = () => {
@@ -2002,6 +2005,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsEl.hidden) { closeSettings(); return; }
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName);
   if (e.key === 'Escape') closeMenus();
+  if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 't') { e.preventDefault(); reloadTheme(); return; }   // reload theme
   // F-keys: same as the terminal app.
   if (e.key === 'F8' && !e.ctrlKey && !e.altKey && !e.metaKey) {      // file / folder selector
     e.preventDefault();

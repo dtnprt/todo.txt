@@ -129,21 +129,31 @@ fn write_note(folder: Option<String>, name: String, text: String) -> Result<(), 
 
 /// Own themes: `~/.todo.txt/themes/NAME.css` -> [(NAME, css)].
 #[tauri::command]
-fn list_user_themes() -> Vec<(String, String)> {
-    let dir = home_dir().join(".todo.txt").join("themes");
-    let mut out = Vec::new();
-    if let Ok(rd) = fs::read_dir(dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("css")) {
-                if let (Some(stem), Ok(css)) = (p.file_stem(), fs::read_to_string(&p)) {
-                    out.push((stem.to_string_lossy().into_owned(), css));
+fn list_user_themes(app: tauri::AppHandle) -> Vec<(String, String)> {
+    use tauri::Manager;
+    // bundled themes (installer resources / `themes` next to the exe, portable) first, then ~/.todo.txt/themes overrides them by name
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(r) = app.path().resource_dir() {
+        dirs.push(r.join("themes"));
+    }
+    if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("themes"))) {
+        dirs.push(d);
+    }
+    dirs.push(home_dir().join(".todo.txt").join("themes"));
+    let mut map = std::collections::BTreeMap::new();
+    for dir in dirs {
+        if let Ok(rd) = fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("css")) {
+                    if let (Some(stem), Ok(css)) = (p.file_stem(), fs::read_to_string(&p)) {
+                        map.insert(stem.to_string_lossy().into_owned(), css);
+                    }
                 }
             }
         }
     }
-    out.sort();
-    out
+    map.into_iter().collect()
 }
 
 /// Write built-in themes (`[(NAME, css)]`) to `~/.todo.txt/themes/NAME.css`; existing files are kept. Returns (written, kept).
