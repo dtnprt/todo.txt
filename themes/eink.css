@@ -1,0 +1,34 @@
+/* E-Ink: greyscale only, flat, no shadows, no blur, no transitions, serif - for e-paper displays and tired eyes */
+:root {
+  --bg: #e9e8e3;
+  --panel: #f3f2ed;
+  --hover: #dcdbd5;
+  --line: #8c8b86;
+  --text: #111111;
+  --muted: #55554f;
+  --accent: #111111;
+  --accent-text: #f3f2ed;
+  --danger: #111111;
+  --warn: #333333;
+  --ok: #333333;
+  --pA: #000000;
+  --pB: #333333;
+  --pC: #555555;
+  --pD: #777777;
+  --pX: #888888;
+  --due-soon: #333333;
+  --due-today: #111111;
+  --due-over: #000000;
+  color-scheme: light;
+  --font: 'Bookerly', 'Literata', Georgia, 'Times New Roman', serif;
+  --font-size: 18px;
+}
+body.theme-eink *, body.theme-eink *::before, body.theme-eink *::after { box-shadow: none !important; text-shadow: none !important; transition: none !important; animation: none !important; backdrop-filter: none !important; border-radius: 0 !important; }
+body.theme-eink .tasks, body.theme-eink .sidebar, body.theme-eink .composer-box { border: 2px solid #111; }
+body.theme-eink .meta.overdue { background: #111; color: #f3f2ed; font-weight: 700; }
+body.theme-eink .meta.today { border: 2px solid #111; font-weight: 700; }
+body.theme-eink .meta.soon { text-decoration: underline; }
+body.theme-eink .task.due-overdue { border-left: 8px solid #111; }
+body.theme-eink .task.due-today { border-left: 5px solid #111; }
+body.theme-eink .task.due-soon { border-left: 2px solid #111; }
+body.theme-eink .dav-corner { opacity: 1; font-size: 13px; }

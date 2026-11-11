@@ -41,3 +41,5 @@ body.theme-voyager-i .topbar .dd-btn:hover, body.theme-voyager-i .topbar > butto
 body.minimal.theme-voyager-i .topbar { background: rgba(0, 0, 0, 0.7); }
 
 body.theme-voyager-i .task .body, body.theme-voyager-i .field .hl, body.theme-voyager-i .field input, body.theme-voyager-i .task .edit, body.theme-voyager-i .task .edit input { font-family: 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif; letter-spacing: normal; }
+
+body.theme-voyager-i .dav-corner { opacity: 1; }

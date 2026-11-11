@@ -27,3 +27,5 @@
 body.theme-paper .tasks, body.theme-paper .composer-box, body.theme-paper .sidebar { border-radius: 2px; box-shadow: none; }
 body.theme-paper button, body.theme-paper input[type=text] { border-radius: 2px; }
 body.theme-paper .topbar, body.theme-paper .status { background: transparent; }
+
+body.theme-paper .dav-corner { color: var(--muted); opacity: 1; font-size: 13px; }

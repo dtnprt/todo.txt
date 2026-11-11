@@ -187,7 +187,7 @@ code.code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono
 .pri-menu button { padding-right: 18px; }
 
 /* keep the add/search bar at the bottom of the window, however short the list is */
-body { min-height: 100vh; display: flex; flex-direction: column; }
+body { min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }
 .layout { flex: 1; width: 100%; box-sizing: border-box; }
 .composer { grid-column: 1 / -1; grid-row: 2; margin-top: 0; margin-left: 16px; }
 .layout.no-side .composer { margin-left: 0; }
@@ -458,3 +458,7 @@ body { overflow-x: clip; }
 
 /* minimal mode: WebDAV file name, small and 80% transparent, bottom left corner */
 .dav-corner { position: fixed; left: 8px; bottom: 4px; z-index: 5; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--muted); opacity: .3; pointer-events: none; user-select: none; }
+
+/* minimal mode: the small file name and the input bar fade into each other */
+.dav-corner { transition: opacity .35s ease; }
+body.minimal.show-input .dav-corner, body.minimal:has(.composer:focus-within) .dav-corner, body.minimal:has(.composer:hover) .dav-corner { opacity: 0 !important; }

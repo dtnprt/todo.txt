@@ -1,0 +1,30 @@
+/* Colour-blind safe: Okabe-Ito palette (distinguishable with deuteranopia, protanopia and tritanopia), light background; due states also differ in stripe width and text decoration, not only in colour */
+:root {
+  --bg: #f4f4f2;
+  --panel: #ffffff;
+  --hover: #ececE8;
+  --line: #c9c9c2;
+  --text: #1a1a1a;
+  --muted: #5e5e58;
+  --accent: #0072B2;
+  --accent-text: #ffffff;
+  --danger: #D55E00;
+  --warn: #8a6a00;
+  --ok: #007a5a;
+  --pA: #D55E00;
+  --pB: #8a6a00;
+  --pC: #0072B2;
+  --pD: #CC79A7;
+  --pX: #6b6b66;
+  --due-soon: #8a6a00;
+  --due-today: #B04A00;
+  --due-over: #B8002E;
+  color-scheme: light;
+  --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-size: 16px;
+}
+body.theme-colorblind .meta.overdue { text-decoration: underline wavy; font-weight: 700; }
+body.theme-colorblind .meta.today { text-decoration: underline; font-weight: 700; }
+body.theme-colorblind .task.due-overdue { box-shadow: inset 6px 0 0 var(--due-over); }
+body.theme-colorblind .task.due-today { box-shadow: inset 5px 0 0 var(--due-today); }
+body.theme-colorblind .task.due-soon { box-shadow: inset 3px 0 0 var(--due-soon); }

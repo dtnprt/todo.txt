@@ -33,3 +33,11 @@ input[type=text], input[type=search], select, textarea { background: rgba(255, 2
 .dd-menu, .ac { background: #fffcf0; box-shadow: 0 8px 20px rgba(30, 60, 20, .28); border-radius: 10px; }
 .help-box { background: color-mix(in srgb, #fffcf0 94%, transparent); }
 button.primary { background: linear-gradient(90deg, #2f7fc4, #4a9ad8); color: #fff; border-color: transparent; }
+
+/* readability fixes: darker due colours on the light panels, visible minimal-mode file name, stripe follows the rounded corners */
+:root { --due-soon: #b86a00; --due-today: #b03a05; --due-over: #b01e1e; }
+.dav-corner { color: #fff; font-size: 13px; opacity: .9; text-shadow: 0 0 3px rgba(20, 40, 15, .85), 0 1px 5px rgba(20, 40, 15, .7); }
+.tasks > .task:first-child { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.tasks > .task:last-child { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+/* stripe covers the 1px list border on the left */
+.task.due-soon, .task.due-today, .task.due-overdue { margin-left: -1px; padding-left: 13px; }
