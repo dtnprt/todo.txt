@@ -462,3 +462,7 @@ body { overflow-x: clip; }
 /* minimal mode: the small file name and the input bar fade into each other */
 .dav-corner { transition: opacity .35s ease; }
 body.minimal.show-input .dav-corner, body.minimal:has(.composer:focus-within) .dav-corner, body.minimal:has(.composer:hover) .dav-corner { opacity: 0 !important; }
+
+/* the due stripe (inset shadow) of the first/last entry follows the rounded corners of the list */
+.tasks > .task:first-child { border-top-left-radius: inherit; border-top-right-radius: inherit; }
+.tasks > .task:last-child { border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; }
