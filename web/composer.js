@@ -180,8 +180,7 @@ export function attachNoteHighlight(ta) {
   hl.setAttribute('aria-hidden', 'true');
   wrap.append(hl, ta);
   const sync = () => {
-    hl.replaceChildren(highlight(ta.value + '
-'));
+    hl.replaceChildren(highlight(ta.value + '\n'));
     hl.scrollTop = ta.scrollTop;
   };
   for (const ev of ['input', 'scroll', 'keyup', 'click', 'focus']) ta.addEventListener(ev, sync);
