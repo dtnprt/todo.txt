@@ -329,11 +329,7 @@ impl App {
         if let Ok(new) = Store::load(&self.path) {
             if new.lines != self.store.lines {
                 let old = std::mem::replace(&mut self.store, new);
-                if crate::webdav::is_remote(&self.path.to_string_lossy()) {
-                    let (removed, added) = list::line_diff(&old.lines, &self.store.lines);
-                    let sorted = list::reordered(&old.lines, &self.store.lines);
-                    self.server_diff = Some((removed, added, 0, sorted));
-                }
+                // Another app's change is applied silently (no diff popup); the status message tells it.
                 self.undo.push(old.lines);
                 if self.undo.len() > 200 {
                     self.undo.remove(0);

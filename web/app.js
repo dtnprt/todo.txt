@@ -640,7 +640,8 @@ async function checkExternalChange(manual = false) {
     state.dirty = false;
     persist();
     render();
-    if (remote && !wasDirty) showServerDiff(diff, false);   // informational, not awaited
+    // A clean reload (change made by another app, e.g. the CLI) is applied silently; the diff is only
+    // shown when unsaved local changes had to be decided on (above) or after a merge on save.
   } catch (e) {
     console.warn('Reload failed:', e);
     if (manual) alert(`Could not read file: ${e.message || e}`);
