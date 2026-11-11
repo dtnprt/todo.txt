@@ -5,7 +5,7 @@
 :root {
   --bg: #031208;
   --panel: #05200e;
-  --hover: #0b3a1a;
+  --hover: #1a6b38;
   --line: #12803a;
   --text: #2bff7a;
   --muted: #17b550;
@@ -43,8 +43,11 @@ body.theme-pipboy::after { content: ""; position: fixed; inset: 0; z-index: 1000
 body.theme-pipboy .topbar, body.theme-pipboy .status { background: var(--panel); border-color: var(--line); }
 body.theme-pipboy .tasks, body.theme-pipboy .composer-box, body.theme-pipboy .sidebar { border: 1px solid var(--line); background: rgba(5, 32, 14, .6); }
 body.theme-pipboy button { border: 1px solid var(--line); }
-body.theme-pipboy button:hover:not(:disabled) { background: var(--accent); color: var(--accent-text); text-shadow: none; }
-body.theme-pipboy .task:hover { background: rgba(43, 255, 122, .12); }
+body.theme-pipboy button:hover:not(:disabled) { background: var(--hover); color: #b6ffd0; }
+body.theme-pipboy .chip { padding: 0 .35em; }
+body.theme-pipboy .meta { font-size: .85em; padding: 0 .35em; }
+body.theme-pipboy .lineno { font-size: inherit; line-height: inherit; margin-top: 0; }
+body.theme-pipboy .task:hover { background: rgba(43, 255, 122, .22); }
 body.theme-pipboy input { caret-color: var(--accent); caret-shape: block; }
 body.theme-pipboy ::selection { background: var(--accent); color: var(--accent-text); }
 
@@ -52,3 +55,4 @@ body.theme-pipboy ::selection { background: var(--accent); color: var(--accent-t
   0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: .94; } 94% { opacity: 1; } 97% { opacity: .96; }
 }
 @media (prefers-reduced-motion: reduce) { body.theme-pipboy { animation: none; } }
+body.theme-pipboy .sidebar h2 { font-size: 1em; padding-left: .5em; }
