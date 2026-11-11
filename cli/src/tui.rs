@@ -235,6 +235,7 @@ struct App {
 }
 
 pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()> {
+    crate::davcache::set_interactive(); // fast WebDAV cache mode (davcache= in todo.cfg)
     let store = Store::load(&path)?;
     let cfg = config::Config::load();
     let disk_text = crate::store::read_text(&path).map(|r| r.0).unwrap_or_default();
@@ -277,6 +278,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
     let mut terminal = ratatui::init();
     let res = app.event_loop(&mut terminal);
     ratatui::restore();
+    crate::davcache::flush(); // push what the background worker has not sent yet
     res
 }
 
@@ -300,7 +302,7 @@ impl App {
             if self.cfg_checked.elapsed() >= Duration::from_secs(1) {
                 self.follow_lastfile();
             }
-            if self.last_check.elapsed() >= Duration::from_secs(if crate::webdav::is_remote(&self.path.to_string_lossy()) { 8 } else { 1 }) {
+            if self.last_check.elapsed() >= Duration::from_secs(if crate::webdav::is_remote(&self.path.to_string_lossy()) && !crate::davcache::active() { 8 } else { 1 }) {
                 self.check_external();
             }
         }

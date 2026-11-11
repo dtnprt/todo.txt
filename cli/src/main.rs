@@ -131,6 +131,10 @@ struct Cli {
     #[arg(long, value_name = "USER@URL")]
     webdav_logout: Option<String>,
 
+    /// WebDAV: fast local cache (`~/.todo.txt/cache/webdav`, synced in the background) on|off; used by the TUI and the desktop app
+    #[arg(long, value_name = "on|off")]
+    webdav_cache: Option<String>,
+
     /// WebDAV: list the files and folders at URL (without URL: the folder of the current todo.txt, or the first server)
     #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
     webdav_ls: Option<String>,
@@ -209,6 +213,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     let mut cfg = Config::load();
 
     // WebDAV server management (no todo file involved)
+    if let Some(v) = &cli.webdav_cache {
+        let on = match v.to_lowercase().as_str() {
+            "on" | "true" | "1" | "yes" => true,
+            "off" | "false" | "0" | "no" => false,
+            _ => return Err("--webdav-cache takes on or off".into()),
+        };
+        cfg.set_other("davcache", if on { "true" } else { "false" });
+        cfg.save()?;
+        println!("WebDAV cache: {}", if on { "on" } else { "off" });
+        if cli.webdav_login.is_none() && cli.webdav_logout.is_none() && cli.webdav_ls.is_none() {
+            return Ok(());
+        }
+    }
     if cli.webdav_login.is_some() || cli.webdav_logout.is_some() || cli.webdav_ls.is_some() {
         return webdav_cmds(&cli, &mut cfg);
     }

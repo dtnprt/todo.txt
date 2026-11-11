@@ -442,3 +442,6 @@ body { overflow-x: clip; }
 .set-pane .variant-seg button:hover:not([aria-checked=true]) { background: var(--hover); }
 .set-pane button.theme-reload { flex: none; margin-left: auto; padding: 8px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; justify-content: center; }
 .set-pane button.theme-reload:hover { background: var(--hover); border-color: var(--accent); }
+
+.img-box { max-width: 92vw; max-height: 92vh; overflow: auto; }
+.img-view { display: block; max-width: 100%; height: auto; margin-top: 8px; }

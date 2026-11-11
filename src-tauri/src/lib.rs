@@ -127,6 +127,49 @@ fn write_note(folder: Option<String>, name: String, text: String) -> Result<(), 
     fs::write(&p, text).map_err(|e| e.to_string())
 }
 
+/// Pasted images: `<folder>/images/FILE` in folder mode, else `~/.todo.txt/images/FILE` (FILE = name with a picture extension).
+fn image_path(folder: &Option<String>, name: &str) -> Result<PathBuf, String> {
+    let ext_ok = name.rsplit_once('.').is_some_and(|(_, e)| matches!(e.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"));
+    let ok = ext_ok && !name.starts_with('.') && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if !ok {
+        return Err(format!("invalid image name '{name}'"));
+    }
+    let dir = match folder.as_deref().filter(|f| !f.is_empty()) {
+        Some(f) => PathBuf::from(f).join("images"),
+        None => home_dir().join(".todo.txt").join("images"),
+    };
+    Ok(dir.join(name))
+}
+
+#[tauri::command]
+fn write_image(folder: Option<String>, name: String, data: Vec<u8>) -> Result<(), String> {
+    let p = image_path(&folder, &name)?;
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    fs::write(&p, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_image(folder: Option<String>, name: String) -> Result<Vec<u8>, String> {
+    fs::read(image_path(&folder, &name)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_image(folder: Option<String>, name: String) -> Result<(), String> {
+    let p = image_path(&folder, &name)?;
+    match fs::remove_file(&p) {
+        Ok(()) => {
+            if let Some(dir) = p.parent() {
+                let _ = fs::remove_dir(dir); // only if empty
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Own themes: `~/.todo.txt/themes/NAME.css` -> [(NAME, css)].
 #[tauri::command]
 fn list_user_themes(app: tauri::AppHandle) -> Vec<(String, String)> {
@@ -388,6 +431,12 @@ struct DavState {
     pending: Option<(usize, usize)>,
 }
 
+/// Is the fast local cache mode on (`davcache=` in todo.cfg)?
+#[tauri::command]
+fn webdav_cache_active() -> bool {
+    davcache::active()
+}
+
 #[tauri::command]
 async fn webdav_state(url: String) -> Result<DavState, String> {
     blocking(move || DavState { offline: davcache::is_offline(), pending: davcache::pending_changes(&url) }).await
@@ -465,6 +514,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            davcache::set_interactive(); // fast WebDAV cache mode (davcache= in todo.cfg)
             // Android has no home folder: the private app folder plays that role (config, cache, credentials)
             #[cfg(target_os = "android")]
             {
@@ -482,6 +532,9 @@ pub fn run() {
                 cfg_path,
                 list_txt_files,
                 read_note,
+                write_image,
+                read_image,
+                delete_image,
                 write_note,
                 delete_note,
                 list_user_themes,
@@ -497,6 +550,7 @@ pub fn run() {
                 webdav_put,
                 webdav_etag,
                 webdav_state,
+                webdav_cache_active,
                 webdav_mkcol,
                 webdav_delete,
                 gitcmds::git_info,
@@ -513,6 +567,9 @@ pub fn run() {
                 cfg_path,
                 list_txt_files,
                 read_note,
+                write_image,
+                read_image,
+                delete_image,
                 write_note,
                 delete_note,
                 list_user_themes,
@@ -528,6 +585,7 @@ pub fn run() {
                 webdav_put,
                 webdav_etag,
                 webdav_state,
+                webdav_cache_active,
                 webdav_mkcol,
                 webdav_delete
     ]);

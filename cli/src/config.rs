@@ -80,6 +80,12 @@ impl Config {
         cfg
     }
 
+    /// Set a key this module does not know about (kept in the file as is).
+    pub fn set_other(&mut self, key: &str, value: &str) {
+        self.other.retain(|(k, _)| k != key);
+        self.other.push((key.to_string(), value.to_string()));
+    }
+
     pub fn save(&self) -> std::io::Result<()> {
         let path = config_path();
         if let Some(dir) = path.parent() {

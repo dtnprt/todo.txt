@@ -169,12 +169,14 @@ const removeLine = (i) => {
   const gone = state.lines[i];
   commit(state.lines.filter((_, j) => j !== i));
   deleteNoteOf(gone);
+  deleteImageOf(gone);
 };
 
 // Desktop: last known content of state.path on disk, used to detect external changes.
 let diskText = null;
 // WebDAV: ETag of the version read last (a save is refused if the file changed on the server meanwhile).
 let davEtag = null;
+let davFast = true;   // fast local cache mode (davcache= in todo.cfg): the change check is a cheap local read
 let davCheckedAt = 0;
 let davServers = [];   // `USER@URL` entries (todo.cfg `webdav=`)
 
@@ -594,7 +596,7 @@ async function readCurrent() {
       const entry = davEntry(state.path);
       if (!entry) return null;
       if (!manualCheck && davEtag) {
-        if (Date.now() - davCheckedAt < 8000) return null;
+        if (Date.now() - davCheckedAt < (davFast ? 1000 : 8000)) return null;
         davCheckedAt = Date.now();
         const tag = await invoke('webdav_etag', { entry, url: state.path });
         refreshDavState();
@@ -749,6 +751,8 @@ const dav = createWebdav({
   invoke,
   servers: () => davServers,
   setServers: (list) => { davServers = list; setCfg('webdav', JSON.stringify(list)); },
+  cacheOn: () => state.davCache,
+  setCache: (on) => { state.davCache = on; davFast = on; setCfg('davcache', on); },
   currentUrl: () => (isRemote(state.path) ? state.path : null),
   canSaveHere: () => true,
   openFolderUrl: (url) => openFolderUrl(url),
@@ -847,6 +851,7 @@ async function loadAutoSave() {
     };
     state.autoSave = /^\s*autosave\s*=/m.test(cfg) ? flag('autosave') : isAndroid;
     state.lineNumbers = flag('linenumbers');
+    state.davCache = davFast = /^\s*davcache\s*=/m.test(cfg) ? flag('davcache') : true;
     state.frameless = flag('frameless');
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
     state.onTop = flag('ontop');
@@ -972,6 +977,74 @@ async function deleteNoteOf(raw) {
   const still = new Set(state.lines.flatMap((l) => T.noteNames(T.parse(l))));
   for (const name of T.noteNames(T.parse(raw))) if (!still.has(name)) await deleteNoteFile(name);
 }
+
+// ---- pasted images: `image:FILE.png`, stored like notes in `<folder>/images/` (else ~/.todo.txt/images/; browser: folder
+// handle, else localStorage as data URL). On a WebDAV file the images stay on this computer (~/.todo.txt/images/).
+const IMG_KEY = 'todotxt.image.';
+const imgFolder = () => (isRemote(state.path || '') ? null : state.folder);
+
+async function writeImage(name, blob) {
+  if (isTauri) return invoke('write_image', { folder: imgFolder(), name, data: Array.from(new Uint8Array(await blob.arrayBuffer())) });
+  if (state.dirHandle) {
+    const dir = await state.dirHandle.getDirectoryHandle('images', { create: true });
+    const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    await w.write(blob);
+    return w.close();
+  }
+  const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+  localStorage.setItem(IMG_KEY + name, url);
+}
+
+/** An object/data URL for the image, or null. */
+async function imageUrl(name) {
+  try {
+    if (isTauri) return URL.createObjectURL(new Blob([new Uint8Array(await invoke('read_image', { folder: imgFolder(), name }))]));
+    if (state.dirHandle) return URL.createObjectURL(await (await (await state.dirHandle.getDirectoryHandle('images')).getFileHandle(name)).getFile());
+    return localStorage.getItem(IMG_KEY + name);
+  } catch { return null; }
+}
+
+async function deleteImageOf(raw) {
+  const still = new Set(state.lines.flatMap((l) => T.imageNames(T.parse(l))));
+  for (const name of T.imageNames(T.parse(raw))) {
+    if (still.has(name)) continue;
+    try {
+      if (isTauri) await invoke('delete_image', { folder: imgFolder(), name });
+      else if (state.dirHandle) await (await state.dirHandle.getDirectoryHandle('images')).removeEntry(name);
+      else localStorage.removeItem(IMG_KEY + name);
+      gitChanged(`images/${name}`);
+    } catch { /* no image file */ }
+  }
+}
+
+async function showImage(name) {
+  if ($('#imgDlg')) return;
+  const url = await imageUrl(name);
+  const body = url ? el('img', { src: url, alt: name, className: 'img-view' }) : el('p', {}, `Image ${name} not found.`);
+  const ov = el('div', { id: 'imgDlg', className: 'help' }, el('div', { className: 'help-box img-box' }, el('h2', {}, name), body));
+  ov.onclick = () => ov.remove();
+  document.body.append(ov);
+}
+
+/** Pasting a picture into the add bar / edit field saves it and inserts `image:NAME`. */
+document.addEventListener('paste', async (e) => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || (input.type && input.type !== 'text')) return;
+  const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
+  if (!file) return;
+  e.preventDefault();
+  const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp' }[file.type] || 'png';
+  const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
+  const name = `img-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.${ext}`;
+  try { await writeImage(name, file); } catch (err) { alert(`Could not save the image: ${err}`); return; }
+  gitChanged(`images/${name}`);
+  checkpoint(input);
+  const a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
+  const before = input.value.slice(0, a), ins = `${before && !/\s$/.test(before) ? ' ' : ''}image:${name} `;
+  input.value = before + ins + input.value.slice(b);
+  input.selectionStart = input.selectionEnd = a + ins.length;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
 
 const noteNameOk = (n) => /^[\w.-]+$/.test(n) && !n.startsWith('.');
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1235,6 +1308,8 @@ function renderWords(frag, text, t, i) {
       const m = /^([^\s:]+):([^\s:]+)$/.exec(part);
       if (m && m[1] === 'note' && T.noteNames(t).includes(m[2])) {
         frag.append(el('button', { className: 'chip note', textContent: part, title: 'Open note', onclick: () => editNote(i, m[2]) }));
+      } else if (m && m[1] === 'image' && T.imageNames(t).includes(m[2])) {
+        frag.append(el('button', { className: 'chip note', textContent: part, title: 'Show image', onclick: () => showImage(m[2]) }));
       } else if (m && !m[2].startsWith('//')) {
         let cls = 'meta';
         if (m[1] === 'due' && !t.done) cls += ' ' + (T.dueStatus(t) || '');
@@ -1769,7 +1844,7 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench' };
+  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', 'space-invaders': 'Space Invaders', pipboy: 'Pip-Boy', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench' };
   const label = (key) => NICE[key.replace(/^user:/, '')] || key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];

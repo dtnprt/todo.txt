@@ -139,6 +139,16 @@ export function noteNames(task) {
   return out;
 }
 
+/** All pasted-image file names of a task (`image:FILE.png` words). */
+export function imageNames(task) {
+  const out = [];
+  for (const w of task.text.split(/\s+/)) {
+    const m = /^image:([\w.-]+\.(?:png|jpe?g|gif|webp|bmp))$/i.exec(w);
+    if (m && !m[1].startsWith('.')) out.push(m[1]);
+  }
+  return out;
+}
+
 /** Name of the first note file of a task, or null. */
 export function noteName(task) {
   return noteNames(task)[0] || null;

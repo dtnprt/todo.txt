@@ -1,6 +1,6 @@
 //! Offline cache for todo files on a WebDAV server (shared by the terminal app and the desktop app).
 //!
-//! Every remote file gets a folder `~/.todo.txt/cache/<hash of the URL>/`:
+//! Every remote file gets a folder `~/.todo.txt/cache/webdav/<hash of the URL>/`:
 //! - `base.txt` + `base.etag`: the version last seen on the server,
 //! - `local.txt`: only present while changes are *pending* (saved while the server was not reachable).
 //!
@@ -12,15 +12,57 @@
 //!   else comes from the server) is pushed, so neither side's changes get lost.
 //!
 //! Only the main todo file is cached (not the notes).
+//!
+//! **Fast mode** (`davcache=on` in `todo.cfg`, default; only in the long-running clients TUI and desktop app,
+//! see `set_interactive`): the cache is the primary copy. Reads come from the cache at once, saves only write
+//! `local.txt` and return; a background worker per file pushes pending changes and polls the server
+//! (`webdav::etag`, every `POLL`) and refreshes the cache when it changed. The "version" handed to the
+//! clients is a local *token* (`token.txt`) that only changes when the content really changed from outside
+//! (own pushes keep it), so their change check is a cheap file read and a change shows up within a second.
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::webdav::{self, Error, Server};
 
 static OFFLINE: AtomicBool = AtomicBool::new(false);
+static INTERACTIVE: AtomicBool = AtomicBool::new(false);
+static LOCK: Mutex<()> = Mutex::new(());
+static WORKERS: Mutex<Vec<(String, Server)>> = Mutex::new(Vec::new());
+static CFG: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
+/// How often the background worker asks the server whether the file changed.
+const POLL: Duration = Duration::from_secs(3);
+
+/// Called by long-running clients (TUI, desktop app): only they use the fast cache mode.
+pub fn set_interactive() {
+    INTERACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// `davcache=` in `todo.cfg` (shared by all clients; default on).
+pub fn config_enabled() -> bool {
+    let mut g = CFG.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((t, v)) = *g {
+        if t.elapsed() < Duration::from_secs(1) {
+            return v;
+        }
+    }
+    let v = fs::read_to_string(home().join(".todo.txt").join("todo.cfg"))
+        .ok()
+        .and_then(|t| t.lines().find_map(|l| l.trim().strip_prefix("davcache=").map(|v| v.trim().to_lowercase())))
+        .map_or(true, |v| !matches!(v.as_str(), "off" | "false" | "0" | "no"));
+    *g = Some((Instant::now(), v));
+    v
+}
+
+/// Fast cache mode in use?
+pub fn active() -> bool {
+    INTERACTIVE.load(Ordering::Relaxed) && config_enabled()
+}
 
 /// True when the last server access failed because the server could not be reached.
 pub fn is_offline() -> bool {
@@ -44,7 +86,7 @@ fn dir(url: &str) -> PathBuf {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
-    home().join(".todo.txt").join("cache").join(format!("{h:016x}"))
+    home().join(".todo.txt").join("cache").join("webdav").join(format!("{h:016x}"))
 }
 
 fn read(d: &std::path::Path, name: &str) -> Option<String> {
@@ -57,10 +99,81 @@ fn write(d: &std::path::Path, name: &str, text: &str) {
 }
 
 fn store_base(d: &std::path::Path, url: &str, text: &str, etag: Option<&str>) {
+    store_base_with(d, url, text, etag, true, true);
+}
+
+/// `bump`: the content changed from the clients' point of view (new token). `clear_local`: drop the pending version.
+fn store_base_with(d: &std::path::Path, url: &str, text: &str, etag: Option<&str>, bump: bool, clear_local: bool) {
+    let changed = read(d, "base.txt").as_deref() != Some(text);
     write(d, "base.txt", text);
     write(d, "base.etag", etag.unwrap_or(""));
     write(d, "url.txt", url);
-    let _ = fs::remove_file(d.join("local.txt"));
+    if clear_local {
+        let _ = fs::remove_file(d.join("local.txt"));
+    }
+    if (bump && changed) || !d.join("token.txt").exists() {
+        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |t| t.as_nanos());
+        write(d, "token.txt", &format!("t{n:x}"));
+    }
+}
+
+fn token(d: &std::path::Path) -> Option<String> {
+    read(d, "token.txt").filter(|t| !t.is_empty())
+}
+
+/// Start the background worker for this file (once per process).
+fn register(server: &Server, url: &str) {
+    {
+        let mut w = WORKERS.lock().unwrap_or_else(|e| e.into_inner());
+        if w.iter().any(|(u, _)| u == url) {
+            return;
+        }
+        w.push((url.to_string(), server.clone()));
+    }
+    let (server, url) = (server.clone(), url.to_string());
+    std::thread::spawn(move || {
+        let d = dir(&url);
+        let mut next_poll = Instant::now() + POLL;
+        let mut next_try = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(200));
+            if !active() {
+                WORKERS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(u, _)| *u != url);
+                return;
+            }
+            let now = Instant::now();
+            if d.join("local.txt").exists() {
+                if now >= next_try && !matches!(sync(&server, &url, None), Ok(Some(_))) {
+                    next_try = Instant::now() + POLL;
+                }
+            } else if now >= next_poll {
+                match webdav::etag(&server, &url) {
+                    Ok(e) => {
+                        set_offline(false);
+                        if e.is_some() && e != base_etag(&d) {
+                            if let Ok((text, etag)) = webdav::get(&server, &url) {
+                                let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                                store_base_with(&d, &url, &text, etag.as_deref(), true, false);
+                            }
+                        }
+                    }
+                    Err(Error::Offline(_)) => set_offline(true),
+                    Err(_) => {}
+                }
+                next_poll = Instant::now() + POLL;
+            }
+        }
+    });
+}
+
+/// Push every pending cached file now (at exit of a long-running client). Unreachable server: stays pending.
+pub fn flush() {
+    let list: Vec<(String, Server)> = WORKERS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    for (url, server) in list {
+        if pending(&url) {
+            let _ = sync(&server, &url, None);
+        }
+    }
 }
 
 fn base_etag(d: &std::path::Path) -> Option<String> {
@@ -182,6 +295,21 @@ pub struct Got {
 /// Read a remote file; falls back to the cache while the server is unreachable.
 /// Pending offline changes are synced first when the server is back.
 pub fn get(server: &Server, url: &str) -> Result<Got, Error> {
+    if active() {
+        let d = dir(url);
+        register(server, url);
+        if let Some(text) = read(&d, "local.txt").or_else(|| read(&d, "base.txt")) {
+            return Ok(Got { text, etag: token(&d), offline: is_offline() });
+        }
+        // nothing cached yet: fetch once, then the cache takes over
+        let mut g = get_remote(server, url)?;
+        g.etag = token(&d).or(g.etag);
+        return Ok(g);
+    }
+    get_remote(server, url)
+}
+
+fn get_remote(server: &Server, url: &str) -> Result<Got, Error> {
     let d = dir(url);
     if d.join("local.txt").exists() {
         return match sync(server, url, None)? {
@@ -218,6 +346,17 @@ pub struct Put {
 /// as pending local version; a conflict with pending offline work is merged instead of refused.
 pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result<Put, Error> {
     let d = dir(url);
+    if active() {
+        register(server, url);
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if read(&d, "base.txt").as_deref() == Some(text) {
+            let _ = fs::remove_file(d.join("local.txt")); // back to the server version: nothing to push
+        } else {
+            write(&d, "local.txt", text);
+            write(&d, "url.txt", url);
+        }
+        return Ok(Put { etag: token(&d).or_else(|| etag.map(str::to_string)), offline: false, merged: None });
+    }
     if d.join("local.txt").exists() {
         return match sync(server, url, Some(text))? {
             Some(g) => Ok(Put { etag: g.etag, offline: false, merged: if g.text != text { Some(g.text) } else { None } }),
@@ -259,6 +398,12 @@ pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result
 
 /// Cheap change check. Also retries a pending sync. `Ok(None)` = unknown / not reachable (= no change).
 pub fn etag(server: &Server, url: &str) -> Result<Option<String>, Error> {
+    if active() {
+        register(server, url);
+        if let Some(t) = token(&dir(url)) {
+            return Ok(Some(t));
+        }
+    }
     if pending(url) {
         return Ok(sync(server, url, None)?.and_then(|g| g.etag));
     }
@@ -311,7 +456,12 @@ fn sync(server: &Server, url: &str, local_override: Option<&str>) -> Result<Opti
     } else {
         setag
     };
-    store_base(&d, url, &merged, etag.as_deref());
+    {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // a newer save may have arrived while pushing: then it stays pending
+        let still = read(&d, "local.txt").as_deref() == Some(local.as_str());
+        store_base_with(&d, url, &merged, etag.as_deref(), merged != local, still);
+    }
     set_offline(false);
     Ok(Some(Got { text: merged, etag, offline: false }))
 }

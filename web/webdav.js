@@ -93,6 +93,11 @@ export function createWebdav(ctx) {
         renderPane(pane);
       } catch (err) { say(msg, String(err)); } finally { go.disabled = false; }
     };
+    const cache = el('input', { type: 'checkbox', checked: ctx.cacheOn() !== false });
+    cache.onchange = () => ctx.setCache(cache.checked);
+    const cacheRow = el('label', { className: 'set-check', title: 'Saves go to ~/.todo.txt/cache/webdav first and are synced in the background; changes on the server are noticed within seconds' },
+      cache, ' Fast local cache (~/.todo.txt/cache/webdav, synced in the background)');
+    pane.append(cacheRow);
     pane.append(el('p', { className: 'set-hint' }, 'Todo files can live on a WebDAV server (Nextcloud, ownCloud, …). Passwords are kept in the OS keyring, never in a file.'),
       list, form, msg);
   }
