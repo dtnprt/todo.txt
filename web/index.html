@@ -92,26 +92,24 @@
       <div class="set-head"><h2>Settings</h2><button type="button" id="setClose" class="icon" title="Close (Esc)" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
       <div class="set-tabs" role="tablist">
         <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
-        <button type="button" role="tab" data-tab="input" aria-selected="false">Input</button>
-        <button type="button" role="tab" data-tab="view" aria-selected="false">View</button>
         <button type="button" role="tab" data-tab="appearance" aria-selected="false">Appearance</button>
         <button type="button" role="tab" data-tab="webdav" aria-selected="false" id="davTab" style="display:none">WebDAV</button>
       </div>
       <div class="set-pane" data-pane="general">
+        <h3 class="set-sub">General</h3>
         <button id="autoSaveToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Auto save</button>
         <button id="showDone" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show completed <kbd>F3</kbd></button>
         <button id="gitInit" class="git-item" role="menuitem" style="display:none"><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Initialize git here…</button>
-      </div>
-      <div class="set-pane" data-pane="input" hidden>
+        <h3 class="set-sub">Input</h3>
         <button id="calToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show calendar while typing <kbd>F6</kbd></button>
         <button id="touchToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show input toolbar (priority, project, due, note…)</button>
-      </div>
-      <div class="set-pane" data-pane="view" hidden>
-        <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show sidebar <kbd>F4</kbd></button>
-        <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show status bar</button>
+        <h3 class="set-sub">View</h3>
+        <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Sidebar <kbd>F4</kbd></button>
+        <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Status bar</button>
         <button id="lineNoToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Line numbers</button>
       </div>
       <div class="set-pane" data-pane="appearance" hidden>
+        <h3 class="set-sub win-sub">Window</h3>
         <button id="framelessToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Hide window frame <kbd>F12</kbd></button>
         <button id="onTopToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Always on top <kbd>F9</kbd></button>
         <button id="minimalToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Minimal mode <kbd>F11</kbd></button>

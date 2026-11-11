@@ -19,7 +19,7 @@ const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
 const baseName = (p) => p.split(/[\\/]/).pop();
 
 // One theme = one CSS file in web/themes/NAME.css (body class `theme-NAME`). To add a theme: drop the file there and add its name here.
-const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'ghibli', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night', 'zelda'];
+const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'ghibli', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'sheikah', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night'];
 // Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
 const themeClass = (t) => 'theme-' + t.replace(/[^\w-]/g, '-');
@@ -100,6 +100,7 @@ function restore() {
     state.minimal = !!s.minimal;
     state.statusBar = s.statusBar !== false;
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
+    if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
     state.theme = THEMES.includes(s.theme) || (isTauri && typeof s.theme === 'string' && s.theme.startsWith('user:')) ? s.theme : '';
   } catch { /* corrupted: start empty */ }
 }
@@ -1311,7 +1312,8 @@ function renderTask({ i, t }, idx) {
   actions.lastChild.setAttribute('aria-label', 'Delete');
 
   if (isTauri && state.lineNumbers) {
-    li.append(grip, el('span', { className: 'lineno', title: `Line ${i + 1}` }, String(i + 1)), cb, pri, body, actions);
+    // the line number takes the place of the drag handle (the handle shows on hover)
+    li.append(el('span', { className: 'slot' }, grip, el('span', { className: 'lineno', title: `Line ${i + 1}` }, String(i + 1))), cb, pri, body, actions);
   } else li.append(grip, cb, pri, body, actions);
   return li;
 }
@@ -2034,6 +2036,12 @@ window.addEventListener('beforeunload', (e) => {
 restore();
 render();
 loadVersion();
+// height of the add/search bar for the sidebar (it scrolls above the bar instead of under it)
+{
+  const form = $('#addForm');
+  if (form && 'ResizeObserver' in window) new ResizeObserver(() => document.documentElement.style.setProperty('--composer-h', form.offsetHeight + 'px')).observe(form);
+}
+
 // ---------- Android: lists in the app storage / on the SD card, filter drawer, back button ----------
 async function androidCreateFile(path) {
   let exists = true;

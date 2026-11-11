@@ -32,5 +32,6 @@ body.theme-light {
     radial-gradient(ellipse 50% 45% at 100% 20%, rgba(167, 139, 250, 0.14), transparent 70%),
     radial-gradient(ellipse 70% 50% at 60% 100%, rgba(45, 212, 191, 0.14), transparent 70%);
   background-size: 1.375rem 1.375rem, 100% 100%, 100% 100%, 100% 100%;
+  background-repeat: repeat;
   background-attachment: fixed;
 }

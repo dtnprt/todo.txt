@@ -45,9 +45,17 @@ input[type=text], input[type=search], select, textarea { background: var(--panel
 #fileList hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 .dirty { color: var(--warn); }
 
-.layout { display: grid; grid-template-columns: 220px 1fr; gap: 16px; max-width: 1100px; margin: 0 auto; padding: 16px; }
-.layout.no-side { grid-template-columns: 1fr; }
-.sidebar { align-self: start; position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; }
+/* Layout: the sidebar sits at the outer left edge, the entries fill the rest (no maximum width, not centred) and the
+   add/search bar spans the whole window below both (`main` is transparent to the grid). The sidebar scrolls by itself. */
+.layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: 1fr auto; column-gap: 16px; padding: 16px 16px 0 0; }
+.layout.no-side { grid-template-columns: minmax(0, 1fr); padding-left: 16px; }
+main { display: contents; }
+.layout > .sidebar { grid-column: 1; grid-row: 1; }
+#list, #raw { grid-column: 2; grid-row: 1; align-self: start; }
+.layout.no-side #list, .layout.no-side #raw { grid-column: 1; }
+#raw { align-self: stretch; }
+.sidebar { align-self: start; position: sticky; top: 64px; margin-left: 16px; max-height: calc(100vh - 64px - 28px - var(--composer-h, 76px) - 8px); overflow: auto; }
+body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px) - 8px); }
 .sidebar h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 4px; }
 .sidebar h2:first-child { margin-top: 0; }
 .side-item { display: flex; justify-content: space-between; width: 100%; text-align: left; border: 0; background: none; border-radius: 6px; padding: 4px 8px; }
@@ -90,9 +98,15 @@ input[type=text], input[type=search], select, textarea { background: var(--panel
 [hidden] { display: none !important; }
 
 @media (max-width: 720px) {
-  .layout { grid-template-columns: 1fr; padding: 12px; }
-  .sidebar { position: static; max-height: none; }
-  .task .actions { opacity: 1; }
+  /* too narrow for the sidebar: hide it (the Android drawer is separate) */
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 12px 12px 0; }
+  .layout #list, .layout #raw { grid-column: 1; }
+  body:not(.android) .sidebar { display: none; }
+  .composer { margin-left: 0 !important; }
+  /* the entry buttons (note / edit / delete) float over the text on hover instead of taking space from it */
+  body:not(.android) .task { position: relative; }
+  body:not(.android) .task .actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); z-index: 2; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 0 2px; opacity: 0; pointer-events: none; }
+  body:not(.android) .task:hover .actions, body:not(.android) .task:focus-within .actions { opacity: 1; pointer-events: auto; }
 }
 
 .dd { position: relative; }
@@ -165,16 +179,16 @@ code.code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono
 
 /* priority dropdown in the task list: same look as the File/View dropdowns */
 .pri-dd { flex: none; }
-.pri-btn { min-width: 3.4em; padding: 2px 8px; text-align: center; }
+.pri-btn { min-width: 2.5em; padding: 2px 6px; text-align: center; border-radius: 2px; }
 .pri-btn:disabled { opacity: .4; cursor: default; }
 .pri-menu { min-width: 0; width: max-content; max-height: 280px; overflow-y: auto; }
 .pri-menu button { padding-right: 18px; }
 
 /* keep the add/search bar at the bottom of the window, however short the list is */
 body { min-height: 100vh; display: flex; flex-direction: column; }
-.layout { flex: 1; width: 100%; }
-main { display: flex; flex-direction: column; min-width: 0; }
-.composer { margin-top: auto; }
+.layout { flex: 1; width: 100%; box-sizing: border-box; }
+.composer { grid-column: 1 / -1; grid-row: 2; margin-top: 0; margin-left: 16px; }
+.layout.no-side .composer { margin-left: 0; }
 
 /* edit helper */
 .edit-helper { position: relative; display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
@@ -186,6 +200,12 @@ main { display: flex; flex-direction: column; min-width: 0; }
 .grip { flex: none; width: 14px; margin: 0; font-size: 12px; color: var(--muted); text-align: center; cursor: grab; }
 .grip.off { visibility: hidden; cursor: default; }
 .lineno { flex: none; min-width: 2.2ch; margin-top: 2px; font-size: 12px; line-height: 20px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+.slot { flex: none; display: inline-grid; place-items: center; min-width: 2.4ch; }
+.slot > * { grid-area: 1 / 1; }
+.slot .lineno { margin: 0; }
+.slot .grip { display: none; }
+.task:hover .slot .grip:not(.off) { display: block; }
+.task:hover .slot .grip:not(.off) ~ .lineno, .task:hover .slot:has(.grip:not(.off)) .lineno { visibility: hidden; }
 .task.dragging { opacity: .4; }
 .task.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .task.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
@@ -240,7 +260,7 @@ input[type=checkbox]:checked::after { visibility: visible; }
 body.minimal .status, body.nostatus .status { display: none !important; }
 body.minimal, body.nostatus { padding-bottom: 0; }
 body.minimal .composer, body.nostatus .composer { bottom: 0; }
-body.minimal .sidebar { top: 16px; max-height: calc(100vh - 32px); }
+body.minimal .sidebar { top: 16px; max-height: calc(100vh - 16px - var(--composer-h, 76px) - 8px); }
 body.minimal .topbar { position: fixed; top: 0; left: 0; right: 0; transform: translateY(-110%); transition: transform .15s; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 body.minimal.show-bar .topbar { transform: none; }
 .win-ctl { display: inline-flex; gap: 2px; margin-left: 4px; }
@@ -264,14 +284,15 @@ body.minimal.show-bar .topbar { transform: none; }
 .dd-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 
 /* status bar: git status left, counts right */
-.status { display: flex; justify-content: flex-end; gap: 16px; }
+.status { display: flex; justify-content: flex-start; gap: 16px; }
+.status-right { margin-left: auto; }
 .status[hidden] { display: none; }
 .status-folder { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 0; max-width: 30%; }
 .status-folder.status-dav { max-width: 55%; }
 .diff-sort { color: var(--warn); }
 .status-offline { color: var(--warn); font-weight: 600; margin-right: 10px; white-space: nowrap; }
 @media (max-width: 700px) { .status-folder { display: none; } }
-.status-git { margin-right: auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+.status-git { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
 .status-git.dirty { color: var(--warn); }
 .status-folder + .status-git { margin-left: 0; }
 .status-right { flex-shrink: 0; }
@@ -293,6 +314,8 @@ button i.fa-solid { display: block; line-height: 1; }
 .set-pane [role=menuitemcheckbox] .tick i { visibility: hidden; font-size: 10px; width: auto; margin: 0; }
 .set-pane [role=menuitemcheckbox][aria-checked=true] .tick i { visibility: visible; }
 .set-sub { margin: 14px 0 6px; font-size: 1em; font-weight: 600; flex-shrink: 0; }
+.set-pane > .set-sub:first-child { margin-top: 0; }
+body.android .win-sub { display: none; }
 #themeMenu { border: 1px solid var(--line); border-radius: 8px; padding: 4px; flex: 1 1 auto; min-height: 120px; overflow-y: auto; margin-right: 14px; }
 #themeMenu .theme-export { position: sticky; bottom: -4px; background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; margin-top: 4px; width: 100%; box-sizing: border-box; }
 .set-hint { display: block; padding: 4px 10px; color: var(--muted); }
@@ -396,3 +419,5 @@ body.android .set-box, body.android .files-box { inset: 8px; }
 .files-new .primary, .files-pick button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .files-pick { position: absolute; left: 16px; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
 .files-pick button { min-height: 44px; }
+body.android .composer { margin-left: 0; }
+body.android .sidebar { margin-left: 0; }
