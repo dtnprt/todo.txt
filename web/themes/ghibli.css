@@ -1,0 +1,38 @@
+/* Ghibli - painted sky over a green meadow, white clouds, thatch-roof ochre and rusty-castle brown (palette from a Howl's Moving Castle still). System serif font, no embedded font. */
+:root {
+  --bg: #7fc4ea;
+  --panel: rgba(255, 252, 240, .9);
+  --hover: rgba(124, 194, 67, .22);
+  --line: rgba(95, 130, 70, .35);
+  --text: #2c3a22;
+  --muted: #6c7d5c;
+  --accent: #2f7fc4;
+  --accent-text: #ffffff;
+  --danger: #b5452c;
+  --warn: #b9731c;
+  --ok: #3f8f2a;
+  --pA: #b5452c;
+  --pB: #c9822a;
+  --pC: #4f9a2a;
+  --pD: #2f7fc4;
+  --pX: #6c7d5c;
+  color-scheme: light;
+  --font: 'Palatino Linotype', 'Book Antiqua', Palatino, 'Iowan Old Style', Georgia, serif;
+  --font-size: 16px;
+  /* blue sky with soft clouds at the top, a mountain-grey haze in the middle, rolling green meadow at the bottom */
+  --bg-image:
+    radial-gradient(ellipse 28% 14% at 12% 12%, rgba(255,255,255,.9), transparent 70%),
+    radial-gradient(ellipse 34% 16% at 88% 20%, rgba(255,255,255,.85), transparent 70%),
+    radial-gradient(ellipse 60% 20% at 70% 58%, rgba(255,255,255,.75), transparent 72%),
+    radial-gradient(ellipse 90% 28% at 20% 108%, #5aa532, transparent 72%),
+    linear-gradient(180deg, #3f95dc 0%, #8cc8ee 34%, #dbe9ee 52%, #b6d98a 66%, #78bb3d 84%, #4f9a2a 100%);
+}
+body { background-attachment: fixed; background-size: cover; }
+
+.topbar, .status { background: rgba(255, 252, 240, .72); backdrop-filter: blur(6px); }
+.tasks, .composer-box, .dd-menu, .ac { backdrop-filter: blur(6px); border-color: var(--line); }
+.tasks { box-shadow: 0 10px 28px -12px rgba(30, 60, 20, .45); border-radius: 12px; }
+.composer-box { background: rgba(255, 252, 240, .9); border-radius: 12px; }
+.dd-menu, .ac { background: #fffcf0; box-shadow: 0 8px 20px rgba(30, 60, 20, .28); border-radius: 10px; }
+.help-box { background: color-mix(in srgb, #fffcf0 94%, transparent); }
+button.primary { background: linear-gradient(90deg, #2f7fc4, #4a9ad8); color: #fff; border-color: transparent; }

@@ -18,7 +18,7 @@ const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
 const baseName = (p) => p.split(/[\\/]/).pop();
 
 // One theme = one CSS file in web/themes/NAME.css (body class `theme-NAME`). To add a theme: drop the file there and add its name here.
-const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night', 'zelda'];
+const THEMES = ['catppuccin-frappe', 'catppuccin-latte', 'catppuccin-macchiato', 'catppuccin-mocha', 'comic', 'dracula', 'ghibli', 'grand-theft-six', 'hacker', 'iceberg', 'iceberg-light', 'lavender', 'lcars', 'light', 'manuscript', 'mario', 'nord', 'nord-light', 'oceanic-next', 'onehalf-dark', 'onehalf-light', 'postit', 'rosepine', 'rosepine-dawn', 'rosepine-moon', 'solarized-dark', 'solarized-light', 'space', 'tokyonight', 'tokyonight-day', 'tokyonight-storm', 'tomorrow', 'tomorrow-night', 'zelda'];
 // Own themes (desktop): `~/.todo.txt/themes/NAME.css`, same format as web/themes/*.css. Stored as `user:NAME`.
 let userThemes = {};   // name -> css text
 const themeClass = (t) => 'theme-' + t.replace(/[^\w-]/g, '-');
@@ -1014,7 +1014,7 @@ function toggleFilter(key, value) {
 function renderSidebar() {
   const side = $('#sidebar');
   side.replaceChildren();
-  const section = (title, entries, key, label = (k) => k) => {
+  const section = (title, entries, key, label = (k) => k, cls = () => '') => {
     const h = el('h2', {}, el('span', { textContent: title }));
     if (state.filter[key]) {
       h.append(el('button', {
@@ -1028,12 +1028,12 @@ function renderSidebar() {
       side.append(el('button', {
         className: 'side-item' + (state.filter[key] === k ? ' active' : ''),
         onclick: () => toggleFilter(key, k),
-      }, el('span', { textContent: label(k) }), el('span', { className: 'n', textContent: n })));
+      }, el('span', { className: cls(k), textContent: label(k) }), el('span', { className: 'n', textContent: n })));
     }
   };
-  section('Projects', countBy((t) => t.projects, false, 'project'), 'project', (k) => '+' + k);
-  section('Contexts', countBy((t) => t.contexts, false, 'context'), 'context', (k) => '@' + k);
-  section('Priority', countBy((t) => (t.priority ? [t.priority] : []), false, 'priority'), 'priority', (k) => `(${k})`);
+  section('Projects', countBy((t) => t.projects, false, 'project'), 'project', (k) => '+' + k, () => 'tk-project');
+  section('Contexts', countBy((t) => t.contexts, false, 'context'), 'context', (k) => '@' + k, () => 'tk-context');
+  section('Priority', countBy((t) => (t.priority ? [t.priority] : []), false, 'priority'), 'priority', (k) => k, (k) => `tk-p${k}`);
 }
 
 /** Render a task description with clickable projects/contexts, tag badges and links. */
@@ -1552,11 +1552,11 @@ function togglePrioPopup(anchor, current, pick) {
   };
   const ic = (n) => el('i', { className: `fa-solid fa-${n}` });
   bar.append(
-    btn([ic('arrow-up-wide-short'), ' prio'], 'Priority', (e) => togglePrioPopup(e.currentTarget, null, setPrio), 'tb-w tb-prio'),
+    btn([ic('arrow-up-wide-short')], 'Priority', (e) => togglePrioPopup(e.currentTarget, null, setPrio), 'tb-w tb-prio'),
     btn([ic('folder-tree'), ' +'], 'Project (+name)', () => insert('+'), 'tb-w'),
     btn([ic('at'), ''], 'Context (@name)', () => insert('@'), 'tb-w'),
-    btn([ic('calendar-day'), ' due'], 'Due date (opens the calendar)', () => insert('due:'), 'tb-w'),
-    btn([ic('note-sticky'), ' note'], 'Add a note', () => { insert('note:'); noteForInput(input); }, 'tb-w'),
+    btn([ic('calendar-day')], 'Due date (opens the calendar)', () => insert('due:'), 'tb-w'),
+    btn([ic('note-sticky')], 'Add a note', () => { insert('note:'); noteForInput(input); }, 'tb-w'),
     el('span', { className: 'spacer' }),
     el('button', { type: 'submit', className: 'tb tb-add', title: 'Add task (Enter)', 'aria-label': 'Add task' }, ic('plus'), ' Add'));
   // keep the focus (and the on-screen keyboard) in the input when tapping a button
@@ -1580,7 +1580,27 @@ function buildThemeMenu() {
   } else if (isTauri) {
     menu.append(el('hr'), el('small', { className: 'set-hint', textContent: 'Put your own NAME.css in ~/.todo.txt/themes/ to add a theme.' }));
   }
+  if (isTauri) {
+    const ex = el('button', { type: 'button', title: 'Write all built-in themes as NAME.css into ~/.todo.txt/themes (existing files are kept) so you can edit them' },
+      el('i', { className: 'fa-solid fa-file-export' }), ' Export all themes to the themes folder');
+    ex.onclick = exportThemes;
+    menu.append(el('hr'), ex);
+  }
   applyTheme();
+}
+/** Desktop: write every built-in theme to ~/.todo.txt/themes/NAME.css (never overwrites an existing file). */
+async function exportThemes() {
+  try {
+    const files = [];
+    for (const name of THEMES) {
+      const r = await fetch(`themes/${name}.css`);
+      if (r.ok) files.push([name, await r.text()]);
+    }
+    const [written, kept] = await invoke('export_themes', { files });
+    userThemes = {};
+    await loadUserThemes();
+    alert(`Themes exported to ~/.todo.txt/themes: ${written} written, ${kept} already there (kept).`);
+  } catch (e) { alert(`Export failed: ${e.message || e}`); }
 }
 /** (Re)read the own themes (desktop); called at start and whenever the settings open. */
 async function loadUserThemes() {

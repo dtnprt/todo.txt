@@ -52,6 +52,7 @@ input[type=text], input[type=search], select, textarea { background: var(--panel
 .sidebar h2:first-child { margin-top: 0; }
 .side-item { display: flex; justify-content: space-between; width: 100%; text-align: left; border: 0; background: none; border-radius: 6px; padding: 4px 8px; }
 .side-item.active { background: var(--accent); color: var(--accent-text); }
+.side-item.active span { color: inherit; }
 .side-item .n { color: var(--muted); font-variant-numeric: tabular-nums; }
 .side-item.active .n { color: inherit; opacity: .8; }
 .side-empty { color: var(--muted); padding: 4px 8px; font-size: 13px; }
@@ -287,6 +288,8 @@ button i.fa-solid { display: block; line-height: 1; }
 .set-pane [role=menuitemcheckbox][aria-checked=true] .tick { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .set-pane [role=menuitemcheckbox] .tick i { visibility: hidden; font-size: 10px; width: auto; margin: 0; }
 .set-pane [role=menuitemcheckbox][aria-checked=true] .tick i { visibility: visible; }
+.set-sub { margin: 14px 0 6px; font-size: 1em; font-weight: 600; flex-shrink: 0; }
+#themeMenu { border: 1px solid var(--line); border-radius: 8px; padding: 4px; flex-shrink: 0; }
 .set-hint { display: block; padding: 4px 10px; color: var(--muted); }
 
 /* ---- note editor: name field + notes dropdown ---- */

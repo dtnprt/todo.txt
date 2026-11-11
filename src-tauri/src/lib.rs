@@ -142,6 +142,27 @@ fn list_user_themes() -> Vec<(String, String)> {
     out
 }
 
+/// Write built-in themes (`[(NAME, css)]`) to `~/.todo.txt/themes/NAME.css`; existing files are kept. Returns (written, kept).
+#[tauri::command]
+fn export_themes(files: Vec<(String, String)>) -> Result<(usize, usize), String> {
+    let dir = home_dir().join(".todo.txt").join("themes");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let (mut written, mut kept) = (0, 0);
+    for (name, css) in files {
+        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            continue;
+        }
+        let p = dir.join(format!("{name}.css"));
+        if p.exists() {
+            kept += 1;
+        } else {
+            fs::write(&p, css).map_err(|e| e.to_string())?;
+            written += 1;
+        }
+    }
+    Ok((written, kept))
+}
+
 #[tauri::command]
 fn delete_note(folder: Option<String>, name: String) -> Result<(), String> {
     let p = note_path(&folder, &name)?;
@@ -389,6 +410,7 @@ pub fn run() {
             write_note,
             delete_note,
             list_user_themes,
+            export_themes,
             app_version,
             git_info,
             git_status,
