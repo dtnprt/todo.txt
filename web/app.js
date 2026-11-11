@@ -1978,9 +1978,11 @@ document.addEventListener('mousedown', (e) => {
 // Minimal mode: the top bar slides in as an overlay when the mouse is above the first entry.
 {
   const bar = document.querySelector('.topbar');
+  document.documentElement.addEventListener('mouseleave', () => document.body.classList.remove('show-input'));
+  document.documentElement.addEventListener('mouseenter', () => { if (state.minimal) document.body.classList.add('show-input'); });
   document.addEventListener('mousemove', (e) => {
     if (!state.minimal) return;
-    document.body.classList.toggle('show-input', e.clientY > window.innerHeight - 80);
+    document.body.classList.add('show-input');
     const shown = document.body.classList.contains('show-bar');
     if (!shown) {
       const first = document.querySelector('#list .task, #raw:not([hidden])');

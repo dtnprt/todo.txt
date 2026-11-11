@@ -262,7 +262,7 @@ body.minimal, body.nostatus { padding-bottom: 0; }
 body.minimal .composer, body.nostatus .composer { bottom: 0; }
 body.minimal .sidebar { top: 16px; max-height: calc(100vh - 32px); }
 /* minimal mode: the input floats over the entries; shown on hover near the bottom, on typing/focus */
-body.minimal .composer { position: fixed; left: 16px; right: 16px; bottom: 0; margin: 0; z-index: 30; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .15s, transform .15s; }
+body.minimal .composer { position: fixed; left: 16px; right: 16px; bottom: 0; margin: 0; z-index: 30; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .35s ease, transform .35s ease; }
 body.minimal.nosidebar .composer, body.minimal .layout.no-side .composer { left: 16px; }
 body.minimal.show-input .composer, body.minimal .composer:focus-within, body.minimal .composer:hover { opacity: 1; transform: none; pointer-events: auto; }
 body.minimal .topbar { position: fixed; top: 0; left: 0; right: 0; transform: translateY(-110%); transition: transform .15s; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
