@@ -107,7 +107,7 @@ const state = {
   onTop: false,         // desktop only (todo.cfg `ontop=`)
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
   autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
-  frameless: false,    // desktop only; stored in todo.cfg (`frameless=`)
+  frameless: true,     // desktop only; stored in todo.cfg (`frameless=`)
   cornerName: true,    // minimal mode: small file name in the bottom left corner
   showDates: false,    // show created/done dates inside the entries (else only tooltip + status bar on hover)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
@@ -1001,7 +1001,7 @@ async function loadAutoSave() {
     state.autoSave = /^\s*autosave\s*=/m.test(cfg) ? flag('autosave') : isAndroid;
     state.lineNumbers = flag('linenumbers');
     state.davCache = davFast = /^\s*davcache\s*=/m.test(cfg) ? flag('davcache') : true;
-    state.frameless = flag('frameless');
+    state.frameless = /^\s*frameless\s*=/m.test(cfg) ? flag('frameless') : true;
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
     state.onTop = flag('ontop');
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
