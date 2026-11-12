@@ -1489,9 +1489,13 @@ function renderTask({ i, t }, idx) {
   li.dataset.line = i;
   if (t.level) { li.dataset.level = t.level; li.style.setProperty('--lvl', t.level); }
   if (i === parentIndex()) li.classList.add('parent-sel');
-  li.addEventListener('click', (e) => {   // click the entry = make it the parent of new entries; again = deselect
-    if (state.editing !== null || e.target.closest('button, a, input, .dd, .grip, .actions, .dates')) return;
-    toggleParent(i);
+  // Parent selection (again = deselect): click the drag handle / line number, or click the entry
+  // while the add bar text already starts with a dash (= a sub-entry is being typed).
+  li.addEventListener('click', (e) => {
+    if (state.editing !== null) return;
+    if (e.target.closest('.grip, .lineno')) { toggleParent(i); return; }
+    if (e.target.closest('button, a, input, .dd, .actions, .dates')) return;
+    if (/^\s*-/.test(composer.addText)) toggleParent(i);
   });
 
   // Drag handle: reorder / change priority when sorted by priority.

@@ -559,6 +559,8 @@ export function createComposer({ form, input, hl, ac, modeBtn, getWords, onAdd, 
 
   return {
     get mode() { return mode; },
+    /** Text currently typed in the add bar (also while the search mode is active). */
+    get addText() { return mode === 'add' ? input.value : addDraft; },
     setMode,
     /** Reset the search text (e.g. after loading another file). */
     clearSearch() {
