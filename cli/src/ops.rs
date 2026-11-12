@@ -76,6 +76,32 @@ fn dim(s: &str, color: bool) -> String {
     if color { format!("\x1b[90m{s}\x1b[0m") } else { s.to_string() }
 }
 
+/// Add `line` to the end of the list, or - with `parent` (a 1-based line number) - below that entry and its
+/// sub-entries, one level deeper (max `----`). Returns the 1-based number of the new line.
+pub fn insert_task(lines: &mut Vec<String>, line: String, parent: Option<usize>) -> Result<usize, String> {
+    let Some(n) = parent else {
+        lines.push(line);
+        return Ok(lines.len());
+    };
+    let i = n.checked_sub(1).filter(|&i| lines.get(i).is_some_and(|l| !l.trim().is_empty())).ok_or_else(|| format!("no task at line {n}"))?;
+    let line = todotxt::with_level(&line, todotxt::level_of(&lines[i]) + 1);
+    let at = todotxt::subtree_end(lines, i) + 1;
+    lines.insert(at, line);
+    Ok(at + 1)
+}
+
+/// Append `moved` to the todo file `dst` (created if missing; local path or WebDAV URL).
+pub fn append_lines(dst: &std::path::Path, moved: &[String]) -> std::io::Result<()> {
+    let mut store = crate::store::Store::load(dst)?;
+    store.lines.extend(moved.iter().cloned());
+    store.save(dst)
+}
+
+/// Do these lines refer to note or image files (which are not moved with the tasks)?
+pub fn has_attachments(lines: &[String]) -> bool {
+    lines.iter().any(|l| l.split_whitespace().any(|w| w.starts_with("note:") || w.starts_with("image:")))
+}
+
 pub fn print_list(lines: &[String], sort: Sort, style: Style, file_name: &str, header: &str, folder: Option<&std::path::Path>, filter: &Filter, show_done: bool, verbose: bool) {
     let color = use_color();
     let today = todotxt::iso(todotxt::today());
@@ -99,6 +125,7 @@ pub fn print_list(lines: &[String], sort: Sort, style: Style, file_name: &str, h
                     Some(st) if color && st != DueStatus::Upcoming => format!("\x1b[{}m{num}\x1b[0m", due_code(st)),
                     _ => dim(&num, color),
                 };
+                row.push_str(&"  ".repeat(t.level)); // sub-entries are indented
                 row.push_str(if t.done { "[x] " } else { "[ ] " });
                 match t.priority {
                     Some(p) => row.push_str(&paint(&format!("({p}) "), Tok::Priority(p), &today, color && !t.done)),

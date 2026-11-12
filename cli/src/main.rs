@@ -103,6 +103,18 @@ struct Cli {
     #[arg(short = 'a', long)]
     add: bool,
 
+    /// Add the new task as a sub-entry of line NUMBER (one level deeper: `- `, `-- ` ... up to `----`), below that entry
+    #[arg(short = 'u', long, value_name = "NUMBER")]
+    parent: Option<usize>,
+
+    /// Move all tasks matching FILTER (such as "+Project @ctx") with their sub-entries from SOURCE to DEST (created if missing)
+    #[arg(long = "move", num_args = 3, value_names = ["FILTER", "SOURCE", "DEST"])]
+    move_tasks: Option<Vec<String>>,
+
+    /// With --move: only show what would be moved
+    #[arg(long)]
+    dry_run: bool,
+
     /// Edit line NUMBER in an interactive line editor
     #[arg(short = 'e', long, value_name = "NUMBER")]
     edit: Option<usize>,
@@ -230,6 +242,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         return webdav_cmds(&cli, &mut cfg);
     }
 
+    // move tasks between two files, then exit
+    if let Some(v) = &cli.move_tasks {
+        return move_tasks(&v[0], &v[1], &v[2], cli.dry_run);
+    }
+    if cli.dry_run {
+        return Err("--dry-run only works with --move".into());
+    }
+
     // file switcher (menu / number / path), then exit
     if let Some(arg) = &cli.switch {
         let current = cfg.file.clone().unwrap_or_else(config::default_todo_file);
@@ -255,7 +275,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         && cli.delete.is_none()
         && cli.done.is_none()
         && cli.note.is_none()
-        && cli.priority.is_none();
+        && cli.priority.is_none()
+        && cli.parent.is_none();
     let info_only = idle && cli.verbose && !git_switches;
     let tui_mode = idle && !cli.verbose;
     if let (false, false, Some(d)) = (git_switches, tui_mode, &early_dir) {
@@ -423,9 +444,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
                 } else {
                     let mut store = Store::load(&path)?;
                     let line = todotxt::with_creation_date(&norm(new, today), &today_s);
-                    store.lines.push(line.clone());
+                    let n = ops::insert_task(&mut store.lines, line, cli.parent)?;
                     store.save(&path)?;
-                    println!("Added as line {}: {line}", store.lines.len());
+                    println!("Added as line {n}: {}", store.lines[n - 1]);
                 }
             }
         }
@@ -541,14 +562,59 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     if !text.trim().is_empty() {
         let mut store = Store::load(&path)?;
         let line = todotxt::with_creation_date(&norm(text.trim(), today), &today_s);
-        store.lines.push(line.clone());
+        let n = ops::insert_task(&mut store.lines, line, cli.parent)?;
         store.save(&path)?;
-        println!("Added as line {}: {line}", store.lines.len());
+        println!("Added as line {n}: {}", store.lines[n - 1]);
         return Ok(());
+    }
+    if cli.parent.is_some() {
+        return Err("--parent needs a task text (todo -u 5 TEXT) or -a (todo -a -u 5)".into());
     }
 
     // ---- no arguments: interactive mode ----
     tui::run(path, folder, default_sort)?;
+    Ok(())
+}
+
+/// `todo --move FILTER SOURCE DEST [--dry-run]`: the tasks matching FILTER (all terms: `+x`, `@x`, `(A)`, words)
+/// plus their sub-entries are removed from SOURCE and appended to DEST. DEST is written first.
+fn move_tasks(filter: &str, source: &str, dest: &str, dry: bool) -> Result<(), Box<dyn Error>> {
+    let terms: Vec<String> = filter.split_whitespace().map(str::to_string).collect();
+    if terms.is_empty() {
+        return Err("--move needs a filter, e.g. todo --move \"+Project\" source.txt destination.txt".into());
+    }
+    let to_path = |s: &str| -> Result<PathBuf, Box<dyn Error>> {
+        if webdav::is_remote(s) { Ok(PathBuf::from(s)) } else { Ok(std::path::absolute(s)?) }
+    };
+    let (src, dst) = (to_path(source)?, to_path(dest)?);
+    if src == dst {
+        return Err("source and destination are the same file".into());
+    }
+    let remote = |p: &std::path::Path| webdav::is_remote(&p.to_string_lossy());
+    if !remote(&src) && !src.exists() {
+        return Err(format!("source file not found: {}", src.display()).into());
+    }
+    let _commit_src = AutoCommit::new(src.parent().filter(|_| !remote(&src)), &src, false);
+    let _commit_dst = AutoCommit::new(dst.parent().filter(|_| !remote(&dst)), &dst, false);
+    let mut store = Store::load(&src)?;
+    let idx = list::select_for_move(&store.lines, &terms);
+    let moved: Vec<String> = idx.iter().map(|&i| store.lines[i].clone()).collect();
+    println!("{} {} line(s) from {} to {}", if dry { "Would move" } else { "Moving" }, moved.len(), src.display(), dst.display());
+    for &i in &idx {
+        println!("{:>4}  {}", i + 1, store.lines[i]);
+    }
+    if moved.is_empty() || dry {
+        return Ok(());
+    }
+    if ops::has_attachments(&moved) && src.parent() != dst.parent() {
+        eprintln!("todo: some of these tasks have note: or image: files; those files are not moved");
+    }
+    ops::append_lines(&dst, &moved)?; // destination first: nothing is lost if it fails
+    let gone: std::collections::HashSet<usize> = idx.into_iter().collect();
+    let mut i = 0;
+    store.lines.retain(|_| { i += 1; !gone.contains(&(i - 1)) });
+    store.save(&src)?;
+    println!("Done.");
     Ok(())
 }
 

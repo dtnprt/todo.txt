@@ -66,12 +66,14 @@ todo -l +Home @phone                   # filtered list
 todo -x 3                              # toggle done on line 3
 todo -p 3 A                            # set priority
 todo -d 3                              # delete
+todo -u 3 call the bank                # add a sub-entry under line 3 ("- text"; also with -a)
+todo --move "+Work" a.txt b.txt        # move matching tasks (+ sub-entries) to another file (--dry-run to preview)
 todo -D 3                              # edit the note of line 3 in $EDITOR
 todo -f ~/lists                        # use (and remember) a folder
 todo -v                                # show folder, file, git state, version, options
 ```
 
-`todo --help` lists everything. In the TUI press **F1** for the key bindings (`F2` sort, `F3` show done, `F4` sidebar, `F5` archive, `F7` note, `F8` file selector, `F9` git sync, `F10` git settings).
+`todo --help` lists everything. In the TUI press **F1** for the key bindings (`F2` sort, `F3` show done, `F4` sidebar, `F5` archive, `F7` note, `F8` file selector, `F9` git sync, `F10` git settings, `Ctrl+P` parent for new sub-entries, `Ctrl+O` move the filtered tasks to another file).
 
 ### Configuration
 

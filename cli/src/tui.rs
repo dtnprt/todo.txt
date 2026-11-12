@@ -208,6 +208,10 @@ struct App {
     server_diff: Option<(Vec<String>, Vec<String>, usize, bool)>,
     /// Note being edited in the popup (F7, or a `note:` typed into the bar).
     note_edit: Option<NoteEdit>,
+    /// Selected parent entry (Ctrl+P): line index and its text (indices move when the file changes).
+    parent: Option<(usize, String)>,
+    /// Ctrl+O: destination prompt for moving the filtered tasks to another file.
+    move_dlg: Option<LineInput>,
     /// Name of the note being written for a `note:` typed into the bar (finishes the word afterwards).
     store: Store,
     undo: Vec<Vec<String>>,
@@ -251,6 +255,8 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         git_menu: None,
         server_diff: None,
         note_edit: None,
+        parent: None,
+        move_dlg: None,
         store,
         undo: Vec::new(),
         sort,
@@ -585,6 +591,93 @@ impl App {
         todotxt::today()
     }
 
+    /// Current line index of the selected parent (follows it when lines moved; None when it is gone).
+    fn parent_line(&self) -> Option<usize> {
+        let (i, raw) = self.parent.as_ref()?;
+        if self.store.lines.get(*i) == Some(raw) {
+            Some(*i)
+        } else {
+            self.store.lines.iter().position(|l| l == raw)
+        }
+    }
+
+    /// Ctrl+P: make the selected entry the parent of new entries (they are added below it, one level deeper); again = off.
+    fn toggle_parent(&mut self) {
+        let cur = self.parent_line();
+        match (self.sel_line, cur) {
+            (Some(i), c) if c != Some(i) => {
+                self.parent = Some((i, self.store.lines[i].clone()));
+                self.msg = Some(format!("New entries are added under line {}  (Ctrl+P again: off)", i + 1));
+            }
+            _ => {
+                self.parent = None;
+                self.msg = Some("New entries are added at the end".into());
+            }
+        }
+    }
+
+    /// Ctrl+O: ask for a file and move the tasks matching the active filter (and their sub-entries) there.
+    fn open_move(&mut self) {
+        if matches!(self.mode, Mode::Edit(_)) {
+            return;
+        }
+        if !self.filter.is_active() {
+            self.msg = Some("Ctrl+O moves the filtered tasks: select a project/context in the sidebar or search (/) first".into());
+            return;
+        }
+        let n = list::select_matching(&self.store.lines, |l| self.filter.matches_line(l)).len();
+        if n == 0 {
+            self.msg = Some("No task matches the filter".into());
+            return;
+        }
+        let dir = self.path.parent().map(|p| format!("{}{}", p.display(), std::path::MAIN_SEPARATOR)).unwrap_or_default();
+        self.assist = None;
+        self.move_dlg = Some(LineInput::new(if crate::webdav::is_remote(&self.path.to_string_lossy()) { "" } else { &dir }));
+    }
+
+    fn move_key(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Esc => self.move_dlg = None,
+            KeyCode::Enter => self.do_move(),
+            _ => {
+                let today = self.today();
+                if let Some(inp) = &mut self.move_dlg {
+                    inp.handle_key(k, today);
+                }
+            }
+        }
+    }
+
+    fn do_move(&mut self) {
+        let Some(inp) = self.move_dlg.take() else { return };
+        let text = inp.text.trim().to_string();
+        if text.is_empty() {
+            self.msg = Some("No destination given".into());
+            return;
+        }
+        let mut dest = PathBuf::from(&text);
+        if !crate::webdav::is_remote(&text) && dest.is_relative() {
+            dest = self.path.parent().map_or(dest.clone(), |p| p.join(&dest));
+        }
+        if dest == self.path {
+            self.msg = Some("The destination is the open file".into());
+            return;
+        }
+        let idx = list::select_matching(&self.store.lines, |l| self.filter.matches_line(l));
+        let moved: Vec<String> = idx.iter().map(|&i| self.store.lines[i].clone()).collect();
+        if moved.is_empty() {
+            return;
+        }
+        if let Err(e) = crate::ops::append_lines(&dest, &moved) {
+            self.msg = Some(format!("Could not write {}: {e}", dest.display()));
+            return;
+        }
+        let gone: std::collections::HashSet<usize> = idx.into_iter().collect();
+        let lines: Vec<String> = self.store.lines.iter().enumerate().filter(|(i, _)| !gone.contains(i)).map(|(_, l)| l.clone()).collect();
+        self.commit(lines);
+        self.msg = Some(format!("Moved {} line(s) to {}  (Ctrl+Z restores them here, not in the destination)", moved.len(), dest.display()));
+    }
+
     fn reload_view(&mut self) {
         let keep = self.sel_line;
         self.view = list::view(&self.store.lines, self.sort, self.show_done, &self.filter);
@@ -893,8 +986,15 @@ impl App {
             &todotxt::iso(today),
         );
         let mut lines = self.store.lines.clone();
-        lines.push(line.clone());
-        let new_idx = lines.len() - 1;
+        let parent = self.parent_line().map(|i| i + 1);
+        let new_idx = match crate::ops::insert_task(&mut lines, line.clone(), parent) {
+            Ok(n) => n - 1,
+            Err(e) => {
+                self.msg = Some(e);
+                return;
+            }
+        };
+        let line = lines[new_idx].clone();
         self.input.set("");
         self.assist = None;
         self.commit(lines);
@@ -1105,6 +1205,10 @@ impl App {
             self.note_key(k);
             return;
         }
+        if self.move_dlg.is_some() {
+            self.move_key(k);
+            return;
+        }
         if self.help {
             self.help = false;
             return;
@@ -1149,6 +1253,14 @@ impl App {
                 self.refresh_assist();
                 self.save_view();
                 self.msg = Some(format!("Calendar when typing dates: {}", if self.calendar { "on" } else { "off" }));
+                return;
+            }
+            KeyCode::Char('p') if ctrl => {
+                self.toggle_parent();
+                return;
+            }
+            KeyCode::Char('o') if ctrl => {
+                self.open_move();
                 return;
             }
             KeyCode::Char('l') if ctrl => {
@@ -1392,6 +1504,9 @@ impl App {
         if self.note_edit.is_some() {
             self.draw_note_edit(f, area);
         }
+        if self.move_dlg.is_some() {
+            self.draw_move(f, area);
+        }
         if self.server_diff.is_some() {
             self.draw_server_diff(f, area);
         }
@@ -1607,6 +1722,7 @@ impl App {
         let row_due = todotxt::due_status(&t, today).filter(|_| !t.done).and_then(due_style);
         let mut spans = vec![
             Span::styled(format!("{:>3} ", line + 1), row_due.unwrap_or_else(dim)),
+            Span::raw("  ".repeat(t.level)), // sub-entries are indented
             Span::raw(if t.done { "[x] " } else { "[ ] " }),
         ];
         match t.priority {
@@ -1631,12 +1747,39 @@ impl App {
             };
             spans.push(Span::styled(piece, style));
         }
-        ListItem::new(Line::from(spans))
+        let item = ListItem::new(Line::from(spans));
+        if self.parent_line() == Some(line) {
+            item.style(Style::default().bg(Color::Indexed(236)).add_modifier(Modifier::UNDERLINED)) // the selected parent
+        } else {
+            item
+        }
+    }
+
+    fn draw_move(&self, f: &mut Frame, area: Rect) {
+        let Some(inp) = &self.move_dlg else { return };
+        let n = list::select_matching(&self.store.lines, |l| self.filter.matches_line(l)).len();
+        let w = 76.min(area.width.saturating_sub(2));
+        let rect = Rect::new(area.x + area.width.saturating_sub(w) / 2, area.y + area.height.saturating_sub(3) / 2, w, 3.min(area.height));
+        f.render_widget(Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(format!(" Move {n} line(s) (filtered tasks + sub-entries) to file "))
+            .title_bottom(" Enter move · Esc cancel ");
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        let col = inp.text.chars().take(inp.cursor).collect::<String>().width() as u16;
+        let offset = col.saturating_sub(inner.width.saturating_sub(1));
+        f.render_widget(Paragraph::new(inp.text.clone()).scroll((0, offset)), inner);
+        f.set_cursor_position(Position::new(inner.x + col - offset, inner.y));
     }
 
     fn draw_input(&self, f: &mut Frame, area: Rect) {
         let (title, color) = match self.mode {
-            Mode::Add => (" Add task ".to_string(), Color::LightBlue),
+            Mode::Add => match self.parent_line() {
+                Some(i) => (format!(" Add sub-entry under line {}  (Ctrl+P: off) ", i + 1), Color::LightBlue),
+                None => (" Add task ".to_string(), Color::LightBlue),
+            },
             Mode::Search => (" Search  (Esc: back to adding) ".to_string(), Color::Yellow),
             Mode::Edit(i) => (format!(" Edit line {}  (Enter: save, Esc: cancel) ", i + 1), Color::Green),
         };
@@ -1853,6 +1996,9 @@ impl App {
             "           Delete       delete (Ctrl+Z undoes)",
             "           Alt+↑ / Alt+↓  raise / lower priority",
             "           Tab          sidebar filters   Esc  clear filter / quit",
+            "           Ctrl+P       select as parent: new entries go below it, indented (again: off)",
+            "           Ctrl+O       move the filtered tasks (+ sub-entries) to another file",
+            "Sub-entries: start a line with - / -- / --- / ---- (sub, sub-sub ...)",
             "Sidebar:   Enter only this entry   Space add/remove (several = OR in a section)",
             "           Del / Backspace clear that section's filter ([x] at its title)",
             "           any other key starts typing a new task",

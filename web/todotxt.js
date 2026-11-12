@@ -8,6 +8,40 @@ const PRIORITY_RE = /^\(([A-Z])\) /;
 const PRI_TAG_RE = /(?:^|\s)pri:[A-Z](?=\s|$)/;
 const TAG_RE = /^([^\s:]+):([^\s:]+)$/;
 
+// Sub-entries: one to four dashes and a space in front of the line (`- sub`, `-- sub-sub`, ... max `----`).
+const LEVEL_RE = /^(-{1,4}) /;
+export const MAX_LEVEL = 4;
+
+/** Nesting level (0-4) of a raw line and the line without its dash prefix. */
+export function splitLevel(raw) {
+  const m = LEVEL_RE.exec(raw);
+  return m ? [m[1].length, raw.slice(m[0].length)] : [0, raw];
+}
+export const levelOf = (raw) => splitLevel(raw)[0];
+/** `'-- '` for level 2, `''` for level 0. */
+export const levelPrefix = (n) => (n > 0 ? '-'.repeat(Math.min(MAX_LEVEL, n)) + ' ' : '');
+/** The line at another nesting level (0 removes the dashes). */
+export function withLevel(raw, n) {
+  return levelPrefix(n) + splitLevel(raw)[1];
+}
+/** Index of the last line that belongs to the sub-tree of line `i` (the lines below it with a deeper level). */
+export function subtreeEnd(lines, i) {
+  const lv = levelOf(lines[i]);
+  let end = i;
+  for (let j = i + 1; j < lines.length && levelOf(lines[j]) > lv; j++) end = j;
+  return end;
+}
+/** For every line the index of the top-level line its group starts with (an orphaned sub-entry starts its own group). */
+export function groupHeads(lines) {
+  const heads = [];
+  let head = 0;
+  lines.forEach((l, i) => {
+    if (i === 0 || levelOf(l) === 0) head = i;
+    heads.push(head);
+  });
+  return heads;
+}
+
 /** Format a Date as YYYY-MM-DD in local time. */
 export function isoDate(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
@@ -26,12 +60,14 @@ export function parse(raw) {
     completed: null,
     created: null,
     text: '',
+    level: 0,
     projects: [],
     contexts: [],
     tags: {},
   };
 
-  let rest = raw;
+  let rest;
+  [task.level, rest] = splitLevel(raw);
   if (rest.startsWith('x ')) {
     task.done = true;
     rest = rest.slice(2);
@@ -78,7 +114,7 @@ export function parse(raw) {
 export function complete(raw, today = isoDate()) {
   const t = parse(raw);
   if (t.done) return raw;
-  let out = `x ${today} `;
+  let out = `${levelPrefix(t.level)}x ${today} `;
   if (t.created) out += `${t.created} `;
   out += t.text;
   if (t.priority && !t.tags.pri) out += ` pri:${t.priority}`;
@@ -90,7 +126,7 @@ export function reopen(raw) {
   const t = parse(raw);
   if (!t.done) return raw;
   const text = t.text.replace(PRI_TAG_RE, '').trim();
-  let out = '';
+  let out = levelPrefix(t.level);
   if (t.priority) out += `(${t.priority}) `;
   if (t.created) out += `${t.created} `;
   return out + text;
@@ -100,15 +136,15 @@ export function reopen(raw) {
 export function setPriority(raw, priority) {
   const t = parse(raw);
   if (t.done) return raw;
-  const body = raw.replace(PRIORITY_RE, '');
-  return priority ? `(${priority}) ${body}` : body;
+  const body = splitLevel(raw)[1].replace(PRIORITY_RE, '');
+  return levelPrefix(t.level) + (priority ? `(${priority}) ${body}` : body);
 }
 
 /** Prepend a creation date after the priority, unless one is present. */
 export function withCreationDate(raw, today = isoDate()) {
   const t = parse(raw);
   if (t.done || t.created) return raw;
-  return (t.priority ? `(${t.priority}) ` : '') + `${today} ${t.text}`;
+  return levelPrefix(t.level) + (t.priority ? `(${t.priority}) ` : '') + `${today} ${t.text}`;
 }
 
 /** Days before the due date from which a task counts as 'soon' due. */
@@ -126,7 +162,7 @@ export function dueStatus(task, today = isoDate()) {
 
 /** A lower-case priority letter at the very start, `(a) text`, becomes `(A) text`. */
 export function fixPriorityCase(text) {
-  return text.replace(/^\(([a-z])\)/, (_, c) => `(${c.toUpperCase()})`);
+  return text.replace(/^((?:-{1,4} )?)\(([a-z])\)/, (_, pre, c) => `${pre}(${c.toUpperCase()})`);
 }
 
 /** All note names of a task (`note:NAME` words, without extension), in order: a task can have several notes. */
@@ -235,4 +271,45 @@ export function normalizeDue(text, today = new Date()) {
     const d = parseDateExpr(expr, today);
     return d ? `${pre}due:${isoDate(d)}` : all;
   });
+}
+
+
+// ---------- filter terms and moving tasks between files ----------
+
+/**
+ * Does a task match a filter expression like `+Home @phone (A) word`? Every term must match:
+ * `+x` project, `@x` context, `(A)` priority, anything else a case-insensitive substring of the line.
+ */
+export function matchesTerms(raw, terms) {
+  const t = parse(raw);
+  const ci = (list, n) => list.some((x) => x.toLowerCase() === n.toLowerCase());
+  return terms.every((term) => {
+    if (term.length > 1 && term[0] === '+') return ci(t.projects, term.slice(1));
+    if (term.length > 1 && term[0] === '@') return ci(t.contexts, term.slice(1));
+    if (/^\([A-Za-z]\)$/.test(term)) return t.priority === term[1].toUpperCase();
+    return raw.toLowerCase().includes(term.toLowerCase());
+  });
+}
+
+/** Split an expression into terms (whitespace separated). */
+export const filterTerms = (expr) => String(expr).split(/\s+/).filter(Boolean);
+
+/**
+ * Indices of the lines to move for a filter: every matching line together with its sub-entries.
+ * Blank lines never match; they do not end a sub-tree.
+ */
+export function selectForMove(lines, terms) {
+  const picked = new Set();
+  if (!terms.length) return [];
+  lines.forEach((l, i) => {
+    if (!l.trim() || picked.has(i) || !matchesTerms(l, terms)) return;
+    const lv = levelOf(l);
+    picked.add(i);
+    for (let j = i + 1; j < lines.length; j++) {
+      if (!lines[j].trim()) continue;
+      if (levelOf(lines[j]) <= lv) break;
+      picked.add(j);
+    }
+  });
+  return [...picked].sort((a, b) => a - b);
 }

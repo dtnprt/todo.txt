@@ -120,3 +120,32 @@ test('noteNames / nextNoteName', () => {
   assert.equal(T.nextNoteName([]), 'Note-1');
   assert.equal(T.nextNoteName(['Note-1', 'note-2']), 'Note-3');
 });
+
+test('sub-entries', () => {
+  const t = T.parse('-- (A) 2026-01-02 call +x');
+  assert.equal(t.level, 2);
+  assert.equal(t.priority, 'A');
+  assert.equal(t.created, '2026-01-02');
+  assert.equal(t.text, 'call +x');
+  assert.equal(T.parse('----- five').level, 0);
+  assert.equal(T.parse('-nospace').level, 0);
+  assert.equal(T.complete('- 2026-01-02 job', '2026-02-03'), '- x 2026-02-03 2026-01-02 job');
+  assert.equal(T.reopen('- x 2026-02-03 2026-01-02 job pri:B'), '- (B) 2026-01-02 job');
+  assert.equal(T.setPriority('-- job', 'C'), '-- (C) job');
+  assert.equal(T.setPriority('-- (C) job', null), '-- job');
+  assert.equal(T.withCreationDate('-- (C) job', '2026-05-05'), '-- (C) 2026-05-05 job');
+  assert.equal(T.fixPriorityCase('- (a) x'), '- (A) x');
+  assert.equal(T.withLevel('-- x', 1), '- x');
+  assert.equal(T.withLevel('x', 9), '---- x');
+  const L = ['a', '- b', '-- c', 'd'];
+  assert.equal(T.subtreeEnd(L, 0), 2);
+  assert.equal(T.subtreeEnd(L, 1), 2);
+  assert.deepEqual(T.groupHeads(L), [0, 0, 0, 3]);
+});
+
+test('selectForMove takes the sub-tree of every match', () => {
+  const L = ['a +p', '- a1', 'b', '- b1 +p', 'c'];
+  assert.deepEqual(T.selectForMove(L, ['+p']), [0, 1, 3]);
+  assert.deepEqual(T.selectForMove(L, []), []);
+  assert.ok(T.matchesTerms('(A) call +Home @x', ['+home', '@X', '(a)', 'CALL']));
+});

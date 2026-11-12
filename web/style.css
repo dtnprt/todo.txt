@@ -70,7 +70,7 @@ body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px)
 
 .tasks { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .tasks:empty { display: none; }
-.task { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.task { display: flex; gap: 10px; align-items: center; padding: 8px 12px; padding-left: calc(12px + var(--lvl, 0) * 28px); border-bottom: 1px solid var(--line); }
 .task:last-child { border-bottom: 0; }
 .task:hover { background: var(--hover); }
 .task input[type=checkbox] { margin: 0; width: 16px; height: 16px; flex: none; cursor: pointer; }
@@ -466,3 +466,15 @@ body.minimal.show-input .dav-corner, body.minimal:has(.composer:focus-within) .d
 /* the due stripe (inset shadow) of the first/last entry follows the rounded corners of the list */
 .tasks > .task:first-child { border-top-left-radius: inherit; border-top-right-radius: inherit; }
 .tasks > .task:last-child { border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; }
+
+/* ---- sub-entries and the selected parent ---- */
+.task.parent-sel { background-color: var(--hover); background-image: linear-gradient(var(--accent), var(--accent)) !important; background-repeat: no-repeat !important; background-size: 100% 3px !important; background-position: 0 100% !important; }
+
+/* ---- move projects dialog ---- */
+.move-label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: .9em; }
+.move-in { width: 100%; box-sizing: border-box; }
+.move-row { display: flex; gap: 8px; }
+.move-row .move-in { flex: 1; }
+.move-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; max-height: 72px; overflow: auto; }
+.move-preview { max-height: 30vh; }
+.move-err { color: var(--danger); }

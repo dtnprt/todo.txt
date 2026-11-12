@@ -14,9 +14,71 @@ pub fn today() -> NaiveDate {
     chrono::Local::now().date_naive()
 }
 
+/// Deepest sub-entry level (`----`).
+pub const MAX_LEVEL: usize = 4;
+
+/// Sub-entries: one to four dashes and a space in front of the line (`- sub`, `-- sub-sub`).
+/// Returns the level (0 = top level) and the line without the dashes.
+pub fn split_level(raw: &str) -> (usize, &str) {
+    let n = raw.bytes().take_while(|&b| b == b'-').count();
+    if (1..=MAX_LEVEL).contains(&n) && raw.as_bytes().get(n) == Some(&b' ') {
+        (n, &raw[n + 1..])
+    } else {
+        (0, raw)
+    }
+}
+
+pub fn level_of(raw: &str) -> usize {
+    split_level(raw).0
+}
+
+/// `"-- "` for level 2, `""` for level 0.
+pub fn level_prefix(n: usize) -> String {
+    if n == 0 { String::new() } else { format!("{} ", "-".repeat(n.min(MAX_LEVEL))) }
+}
+
+/// The line at another nesting level (0 removes the dashes).
+pub fn with_level(raw: &str, n: usize) -> String {
+    format!("{}{}", level_prefix(n), split_level(raw).1)
+}
+
+/// Index of the last line of the sub-tree of line `i`: the lines below it with a deeper level
+/// (blank lines do not end it).
+pub fn subtree_end(lines: &[String], i: usize) -> usize {
+    let lv = level_of(&lines[i]);
+    let mut end = i;
+    for (j, l) in lines.iter().enumerate().skip(i + 1) {
+        if l.trim().is_empty() {
+            continue;
+        }
+        if level_of(l) <= lv {
+            break;
+        }
+        end = j;
+    }
+    end
+}
+
+/// For every line the index of the top-level line its group starts with (blank lines belong to the group before).
+pub fn group_heads(lines: &[String]) -> Vec<usize> {
+    let mut head = 0;
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 0 || (!l.trim().is_empty() && level_of(l) == 0) {
+                head = i;
+            }
+            head
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Task {
     pub raw: String,
+    /// Sub-entry level: 0 = normal, 1 = `- `, ... 4 = `---- `.
+    pub level: usize,
     pub done: bool,
     pub priority: Option<char>,
     pub completed: Option<String>,
@@ -54,8 +116,9 @@ fn priority_prefix(s: &str) -> Option<char> {
 }
 
 pub fn parse(raw: &str) -> Task {
-    let mut t = Task { raw: raw.to_string(), ..Default::default() };
-    let mut rest = raw;
+    let (level, body) = split_level(raw);
+    let mut t = Task { raw: raw.to_string(), level, ..Default::default() };
+    let mut rest = body;
     if let Some(r) = rest.strip_prefix("x ") {
         t.done = true;
         rest = r;
@@ -116,7 +179,7 @@ pub fn complete(raw: &str, today: &str) -> String {
     if t.done {
         return raw.to_string();
     }
-    let mut out = format!("x {today} ");
+    let mut out = format!("{}x {today} ", level_prefix(t.level));
     if let Some(c) = &t.created {
         out.push_str(c);
         out.push(' ');
@@ -156,7 +219,7 @@ pub fn reopen(raw: &str) -> String {
     if !t.done {
         return raw.to_string();
     }
-    let mut out = String::new();
+    let mut out = level_prefix(t.level);
     if let Some(p) = t.priority {
         out.push_str(&format!("({p}) "));
     }
@@ -174,10 +237,12 @@ pub fn set_priority(raw: &str, priority: Option<char>) -> String {
     if t.done {
         return raw.to_string();
     }
-    let body = if priority_prefix(raw).is_some() { &raw[4..] } else { raw };
+    let rest = split_level(raw).1;
+    let body = if priority_prefix(rest).is_some() { &rest[4..] } else { rest };
+    let pre = level_prefix(t.level);
     match priority {
-        Some(p) => format!("({p}) {body}"),
-        None => body.to_string(),
+        Some(p) => format!("{pre}({p}) {body}"),
+        None => format!("{pre}{body}"),
     }
 }
 
@@ -187,9 +252,10 @@ pub fn with_creation_date(raw: &str, today: &str) -> String {
     if t.done || t.created.is_some() {
         return raw.to_string();
     }
+    let pre = level_prefix(t.level);
     match t.priority {
-        Some(p) => format!("({p}) {today} {}", t.text),
-        None => format!("{today} {}", t.text),
+        Some(p) => format!("{pre}({p}) {today} {}", t.text),
+        None => format!("{pre}{today} {}", t.text),
     }
 }
 
@@ -207,9 +273,10 @@ pub const SOON_DAYS: i64 = 3;
 
 /// A lower-case priority letter at the very start, `(a) text`, becomes `(A) text`.
 pub fn fix_priority_case(text: &str) -> String {
-    let b = text.as_bytes();
+    let (level, rest) = split_level(text);
+    let b = rest.as_bytes();
     if b.len() >= 3 && b[0] == b'(' && b[1].is_ascii_lowercase() && b[2] == b')' {
-        format!("({}){}", (b[1] as char).to_ascii_uppercase(), &text[3..])
+        format!("{}({}){}", level_prefix(level), (b[1] as char).to_ascii_uppercase(), &rest[3..])
     } else {
         text.to_string()
     }
@@ -415,5 +482,25 @@ mod tests {
         assert_eq!(normalize_due("A due:whenever", today), "A due:whenever");
         assert_eq!(normalize_due("call tomorrow +3d", today), "call tomorrow +3d");
         assert_eq!(normalize_due("overdue:today", today), "overdue:today");
+    }
+
+    #[test]
+    fn sub_entries() {
+        let t = parse("-- (A) 2026-01-02 call +x");
+        assert_eq!((t.level, t.priority, t.created.as_deref(), t.text.as_str()), (2, Some('A'), Some("2026-01-02"), "call +x"));
+        assert_eq!(parse("----- five").level, 0);
+        assert_eq!(parse("-nospace").level, 0);
+        assert_eq!(complete("- 2026-01-02 job", "2026-02-03"), "- x 2026-02-03 2026-01-02 job");
+        assert_eq!(reopen("- x 2026-02-03 2026-01-02 job pri:B"), "- (B) 2026-01-02 job");
+        assert_eq!(set_priority("-- job", Some('C')), "-- (C) job");
+        assert_eq!(set_priority("-- (C) job", None), "-- job");
+        assert_eq!(with_creation_date("-- (C) job", "2026-05-05"), "-- (C) 2026-05-05 job");
+        assert_eq!(fix_priority_case("- (a) x"), "- (A) x");
+        assert_eq!(with_level("-- x", 1), "- x");
+        assert_eq!(with_level("x", 9), "---- x");
+        let l: Vec<String> = ["a", "- b", "-- c", "d"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(subtree_end(&l, 0), 2);
+        assert_eq!(subtree_end(&l, 1), 2);
+        assert_eq!(group_heads(&l), vec![0, 0, 0, 3]);
     }
 }

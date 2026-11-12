@@ -107,7 +107,9 @@ const state = {
   sort: 'priority',
   view: 'list',
   editing: null,       // line index being edited
+  parent: null,        // line index of the selected parent entry: new tasks are added as its sub-entries
 };
+let parentRaw = null;  // text of that line (line numbers move when the list is sorted or saved)
 
 // ---------- persistence (localStorage is a working copy, not the file) ----------
 
@@ -167,7 +169,41 @@ function undo() {
   render();
 }
 
-const replaceLine = (i, raw) => commit(state.lines.map((l, j) => (j === i ? raw : l)));
+const replaceLine = (i, raw) => {
+  if (i === parentIndex()) parentRaw = raw;
+  commit(state.lines.map((l, j) => (j === i ? raw : l)));
+};
+
+// ---------- sub-entries: `- sub`, `-- sub-sub` ... (max 4 dashes), and the selected parent ----------
+
+/** Current index of the selected parent line (-1 = none); follows it when the list was sorted meanwhile. */
+function parentIndex() {
+  if (state.parent == null) return -1;
+  if (state.lines[state.parent] === parentRaw) return state.parent;
+  const j = state.lines.indexOf(parentRaw);
+  if (j >= 0) { state.parent = j; return j; }
+  state.parent = null; parentRaw = null;
+  return -1;
+}
+/** Select line `i` as the parent (clicking the selected one again deselects it). No re-render: keeps double-click editing working. */
+function toggleParent(i) {
+  if (i === parentIndex()) { state.parent = null; parentRaw = null; }
+  else { state.parent = i; parentRaw = state.lines[i]; }
+  markParent();
+}
+function markParent() {
+  const p = parentIndex();
+  document.querySelectorAll('#list .task').forEach((li) => li.classList.toggle('parent-sel', +li.dataset.line === p));
+}
+/** Add a typed task: below the selected parent (one level deeper) or at the end of the list. */
+function addTask(text) {
+  let line = T.withCreationDate(T.normalizeDue(T.fixPriorityCase(text)));
+  const p = parentIndex();
+  if (p < 0) return commit([...state.lines, line]);
+  line = T.withLevel(line, T.levelOf(state.lines[p]) + 1);
+  const at = T.subtreeEnd(state.lines, p) + 1;
+  commit([...state.lines.slice(0, at), line, ...state.lines.slice(at)]);
+}
 const removeLine = (i) => {
   const gone = state.lines[i];
   commit(state.lines.filter((_, j) => j !== i));
@@ -587,6 +623,106 @@ function showServerDiff({ removed, added, reordered }, ask) {
     document.body.append(ov);
     buttons[0].focus();
   });
+}
+
+// ---------- move projects (filtered tasks, with their sub-entries) into another file ----------
+
+/** Text of a todo file for moving: {text, etag}; a file that does not exist yet is empty. */
+async function readForMove(p) {
+  if (isRemote(p)) {
+    const entry = davEntry(p);
+    if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
+    const r = await invoke('webdav_get', { entry, url: p });
+    return { text: r.missing ? '' : r.text, etag: r.missing ? null : r.etag, entry };
+  }
+  let exists = true;
+  try { if (tauri.fs.exists) exists = await tauri.fs.exists(p); } catch { /* assume it exists */ }
+  return { text: exists ? await tauri.fs.readTextFile(p) : '', etag: null };
+}
+async function writeForMove(p, text, r) {
+  if (isRemote(p)) await invoke('webdav_put', { entry: r.entry, url: p, text, etag: r.etag });
+  else await tauri.fs.writeTextFile(p, text);
+}
+
+function moveDialog() {
+  if (!isTauri) return;
+  const f = state.filter;
+  const pre = [f.project.length === 1 && '+' + f.project[0], f.context.length === 1 && '@' + f.context[0], f.priority.length === 1 && `(${f.priority[0]})`].filter(Boolean);
+  const close = () => { document.removeEventListener('keydown', onKey, true); ov.remove(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+
+  const filterIn = el('input', { type: 'text', className: 'move-in', value: pre.join(' '), placeholder: 'e.g. +ProjectName (all terms must match)', spellcheck: false });
+  const destIn = el('input', { type: 'text', className: 'move-in', placeholder: 'destination file (path or WebDAV URL; created if missing)', spellcheck: false });
+  const browse = el('button', { type: 'button', textContent: 'Browse…', onclick: async () => {
+    const p = await tauri.dialog.save({ defaultPath: destIn.value || undefined, filters: TXT_FILTER });
+    if (p) destIn.value = p;
+  } });
+  const chips = el('div', { className: 'move-chips' });
+  const preview = el('div', { className: 'diff-body move-preview' });
+  const info = el('div', { className: 'set-hint' });
+  const err = el('div', { className: 'set-hint move-err' });
+  const go = el('button', { type: 'button', className: 'primary', textContent: 'Move', onclick: () => run() });
+
+  const terms = () => T.filterTerms(filterIn.value);
+  const picked = () => T.selectForMove(state.lines, terms());
+  const update = () => {
+    const idx = picked();
+    preview.replaceChildren(...idx.map((i) => {
+      const lv = T.levelOf(state.lines[i]);
+      return el('div', { className: 'diff-line', style: `padding-left:${10 + lv * 18}px`, textContent: state.lines[i] });
+    }));
+    if (!idx.length) preview.append(el('div', { className: 'set-hint', textContent: terms().length ? 'No task matches.' : 'Enter a filter, e.g. +ProjectName, or click a project below.' }));
+    info.textContent = `${idx.length} of ${state.lines.length} lines will be moved (matching tasks and their sub-entries).`;
+    go.disabled = !idx.length;
+    const hasNotes = idx.some((i) => { const t = T.parse(state.lines[i]); return T.noteNames(t).length || T.imageNames(t).length; });
+    err.textContent = hasNotes ? 'Some of these tasks have notes or images; those files are not moved (they stay in the notes/images folder of this list).' : '';
+  };
+  const addChips = () => {
+    chips.replaceChildren(...countBy((t) => t.projects, true).map(([n, c]) => el('button', { type: 'button', className: 'chip project', textContent: `+${n} ${c}`, onclick: () => {
+      filterIn.value = `+${n}`;
+      update();
+    } })));
+  };
+
+  const run = async () => {
+    err.textContent = '';
+    const dest = destIn.value.trim();
+    const idx = picked();
+    if (!idx.length) return;
+    if (!dest) { err.textContent = 'Choose the destination file.'; return; }
+    if (state.path && dest.replace(/\\/g, '/').toLowerCase() === state.path.replace(/\\/g, '/').toLowerCase()) { err.textContent = 'The destination is the open file.'; return; }
+    go.disabled = true;
+    try {
+      const r = await readForMove(dest);
+      const moved = idx.map((i) => state.lines[i]);
+      // destination first: nothing is removed from this list unless it was written
+      await writeForMove(dest, T.serializeFile([...T.parseFile(r.text), ...moved]), r);
+      const gone = new Set(idx);
+      commit(state.lines.filter((_, i) => !gone.has(i)));
+      if (state.folder && dirOf(dest) === dirOf(state.folder + '/x')) gitChanged(baseName(dest));
+      close();
+    } catch (e) {
+      err.textContent = `Could not move: ${e.message || e}`;
+      go.disabled = false;
+    }
+  };
+
+  const ov = el('div', { id: 'moveDlg', className: 'help', onmousedown: (e) => { if (e.target === ov) close(); } },
+    el('div', { className: 'help-box diff-box', role: 'dialog', 'aria-label': 'Move projects' },
+      el('h2', { textContent: 'Move projects to another file' }),
+      el('div', { className: 'set-hint', textContent: 'Tasks matching the filter are removed from this list and appended to the destination file, together with their sub-entries.' }),
+      el('label', { className: 'move-label', textContent: 'Filter' }), filterIn, chips,
+      info, preview,
+      el('label', { className: 'move-label', textContent: 'Destination' }), el('div', { className: 'move-row' }, destIn, browse),
+      err,
+      el('div', { className: 'diff-actions' }, go, el('button', { type: 'button', textContent: 'Cancel', onclick: close }))));
+  filterIn.addEventListener('input', update);
+  destIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(ov);
+  addChips();
+  update();
+  (pre.length ? destIn : filterIn).focus();
 }
 
 // Reload the open file when another program changed it (desktop: polled), or on demand (Refresh button).
@@ -1218,7 +1354,18 @@ function sortItems(items) {
     alpha: (a, b) => a.t.text.toLowerCase().localeCompare(b.t.text.toLowerCase()),
   }[state.sort];
   if (cmp) {
-    items.sort((a, b) => (a.t.done - b.t.done) || cmp(a, b) || a.i - b.i);
+    // sub-entries stay below their parent: a group is sorted by its top-level entry, inside it the file order is kept
+    const heads = T.groupHeads(state.lines);
+    const cache = new Map();
+    const headOf = (x) => {
+      const h = heads[x.i] ?? x.i;
+      if (!cache.has(h)) cache.set(h, { i: h, t: h === x.i ? x.t : T.parse(state.lines[h]) });
+      return cache.get(h);
+    };
+    items.sort((a, b) => {
+      const ha = headOf(a), hb = headOf(b);
+      return (ha.t.done - hb.t.done) || cmp(ha, hb) || ha.i - hb.i || a.i - b.i;
+    });
   }
   return items;
 }
@@ -1330,9 +1477,16 @@ function renderTask({ i, t }, idx) {
   const ds = t.done ? null : T.dueStatus(t);
   const li = el('li', { className: 'task' + (t.done ? ' done' : '') + (ds && ds !== 'upcoming' ? ` due-${ds}` : '') });
   li.dataset.idx = idx;
+  li.dataset.line = i;
+  if (t.level) { li.dataset.level = t.level; li.style.setProperty('--lvl', t.level); }
+  if (i === parentIndex()) li.classList.add('parent-sel');
+  li.addEventListener('click', (e) => {   // click the entry = make it the parent of new entries; again = deselect
+    if (state.editing !== null || e.target.closest('button, a, input, .dd, .grip, .actions, .dates')) return;
+    toggleParent(i);
+  });
 
   // Drag handle: reorder / change priority when sorted by priority.
-  const canDrag = state.sort === 'priority' && !t.done && state.editing !== i;
+  const canDrag = state.sort === 'priority' && !t.done && !t.level && state.editing !== i;
   const grip = el('span', { className: 'grip' + (canDrag ? '' : ' off'), title: canDrag ? 'Drag to change priority' : '' },
     el('i', { className: 'fa-solid fa-grip-vertical' }));
   grip.draggable = canDrag;
@@ -1470,6 +1624,7 @@ function render() {
   applyTheme();
   $('#openFolder').style.display = isTauri || hasDirPicker ? '' : 'none';
   $('#openDav').style.display = isTauri ? '' : 'none';
+  $('#moveProjects').style.display = isTauri ? '' : 'none';
   $('#davTab').style.display = isTauri ? '' : 'none';
   renderGit();
   $('#autoSaveToggle').style.display = isTauri ? '' : 'none';
@@ -1707,23 +1862,27 @@ function dropPoint(e) {
   return { li, after, pos: +li.dataset.idx + (after ? 1 : 0) };
 }
 
-/** Move `lineIdx` to display position `pos`; it takes the priority of the open task above it (or below, at the top). */
+/** Move `lineIdx` (with its sub-entries) to display position `pos`; it takes the priority of the open task above it (or below, at the top). */
 function dropTask(lineIdx, pos) {
-  const isOpen = (k) => viewItems[k] && viewItems[k].i !== lineIdx && !viewItems[k].t.done;
+  const blockEnd = T.subtreeEnd(state.lines, lineIdx);
+  const inBlock = (i) => i >= lineIdx && i <= blockEnd;
+  const heads = T.groupHeads(state.lines);
+  const isOpen = (k) => viewItems[k] && !inBlock(viewItems[k].i) && !viewItems[k].t.done;
   let prev = null;
   let next = null;
   for (let k = pos - 1; k >= 0; k--) if (isOpen(k)) { prev = viewItems[k]; break; }
-  for (let k = pos; k < viewItems.length; k++) if (isOpen(k)) { next = viewItems[k]; break; }
+  for (let k = pos; k < viewItems.length; k++) if (isOpen(k) && !viewItems[k].t.level) { next = viewItems[k]; break; }
 
   const orig = state.lines[lineIdx];
   const source = prev || next;
   const raw = source ? T.setPriority(orig, source.t.priority) : orig;
+  const block = [raw, ...state.lines.slice(lineIdx + 1, blockEnd + 1)];
 
-  const rest = state.lines.map((l, i) => ({ l, i })).filter((o) => o.i !== lineIdx);
+  const rest = state.lines.map((l, i) => ({ l, i })).filter((o) => !inBlock(o.i));
   let at = rest.length;
-  if (prev) at = rest.findIndex((o) => o.i === prev.i) + 1;
+  if (prev) at = rest.findIndex((o) => o.i === T.subtreeEnd(state.lines, heads[prev.i])) + 1;   // after the whole group of the task above
   else if (next) at = rest.findIndex((o) => o.i === next.i);
-  rest.splice(at, 0, { l: raw, i: lineIdx });
+  rest.splice(at, 0, ...block.map((l) => ({ l, i: -1 })));
   const lines = rest.map((o) => o.l);
   if (lines.every((l, k) => l === state.lines[k])) return;   // nothing changed
   commit(lines);
@@ -1763,7 +1922,7 @@ const composer = createComposer({
   getWords: (kind) => (kind === 'priority'
     ? countBy((t) => (t.priority ? [t.priority] : []))
     : countBy((t) => (kind === 'project' ? t.projects : t.contexts), true)),
-  onAdd: (text) => commit([...state.lines, T.withCreationDate(T.normalizeDue(T.fixPriorityCase(text)))]),
+  onAdd: (text) => addTask(text),
   calendarEnabled: () => state.calendar,
   onNote: (inp) => noteForInput(inp),
   onSearch: (q) => { state.filter.q = q; render(); },
@@ -2075,6 +2234,7 @@ document.addEventListener('mousedown', (e) => {
 
 $('#undo').onclick = undo;
 $('#openFolder').onclick = openFolder;
+$('#moveProjects').onclick = moveDialog;
 $('#openDav').onclick = () => dav.openBrowser();
 $('#open').onclick = isAndroid ? () => openFiles(androidDeps()) : openFile;
 $('#new').onclick = isAndroid ? () => openFiles(androidDeps(), { focusNew: true }) : () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };

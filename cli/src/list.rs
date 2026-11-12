@@ -83,8 +83,19 @@ impl Filter {
         }
     }
 
+    /// Does the line match every term (`+x`, `@x`, `(A)` or a substring)?
+    pub fn terms_match(terms: &[String], raw: &str) -> bool {
+        let t = todotxt::parse(raw);
+        terms.iter().all(|term| Filter::term_matches(term, raw, &t))
+    }
+
     pub fn clear(&mut self) {
         *self = Filter::default();
+    }
+
+    /// Does the line pass this filter (sidebar selections + search text + terms)?
+    pub fn matches_line(&self, raw: &str) -> bool {
+        self.matches(raw, &todotxt::parse(raw))
     }
 
     fn matches(&self, raw: &str, t: &Task) -> bool {
@@ -106,29 +117,66 @@ impl Filter {
 }
 
 /// Line indices to show, in display order (blank lines never show up).
+/// Sub-entries (`- `, `-- `) stay below their top-level entry: groups are sorted by the top-level entry,
+/// inside a group the file order is kept.
 pub fn view(lines: &[String], sort: Sort, show_done: bool, filter: &Filter) -> Vec<usize> {
-    let mut items: Vec<(usize, Task)> = lines
+    let heads = todotxt::group_heads(lines);
+    let parsed: Vec<Option<Task>> = lines.iter().map(|l| if l.trim().is_empty() { None } else { Some(todotxt::parse(l)) }).collect();
+    let mut items: Vec<(usize, &Task)> = parsed
         .iter()
         .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty())
-        .map(|(i, l)| (i, todotxt::parse(l)))
+        .filter_map(|(i, t)| t.as_ref().map(|t| (i, t)))
         .filter(|(_, t)| (show_done || !t.done) && filter.matches(&t.raw, t))
         .collect();
+    // the entry a line is sorted by: the head of its group
+    let head = |i: usize| -> (usize, &Task) {
+        let h = heads[i];
+        (h, parsed[h].as_ref().unwrap_or_else(|| parsed[i].as_ref().unwrap()))
+    };
 
     // Same ordering as the web app: completed tasks last, then the key, then file order.
     let last = "\u{ffff}".to_string();
     match sort {
         Sort::File => {}
-        Sort::Priority => items.sort_by_key(|(i, t)| (t.done, t.priority.map_or(u8::MAX, |c| c as u8), *i)),
-        Sort::Due => items.sort_by(|(ia, a), (ib, b)| {
-            (a.done, a.tags.get("due").unwrap_or(&last), ia).cmp(&(b.done, b.tags.get("due").unwrap_or(&last), ib))
+        Sort::Priority => items.sort_by_key(|&(i, _)| {
+            let (h, t) = head(i);
+            (t.done, t.priority.map_or(u8::MAX, |c| c as u8), h, i)
         }),
-        Sort::Created => items.sort_by(|(ia, a), (ib, b)| {
-            (a.done, a.created.as_ref().unwrap_or(&last), ia).cmp(&(b.done, b.created.as_ref().unwrap_or(&last), ib))
+        Sort::Due => items.sort_by(|&(ia, _), &(ib, _)| {
+            let ((ha, a), (hb, b)) = (head(ia), head(ib));
+            (a.done, a.tags.get("due").unwrap_or(&last), ha, ia).cmp(&(b.done, b.tags.get("due").unwrap_or(&last), hb, ib))
         }),
-        Sort::Alpha => items.sort_by_cached_key(|(i, t)| (t.done, t.text.to_lowercase(), *i)),
+        Sort::Created => items.sort_by(|&(ia, _), &(ib, _)| {
+            let ((ha, a), (hb, b)) = (head(ia), head(ib));
+            (a.done, a.created.as_ref().unwrap_or(&last), ha, ia).cmp(&(b.done, b.created.as_ref().unwrap_or(&last), hb, ib))
+        }),
+        Sort::Alpha => items.sort_by_cached_key(|&(i, _)| {
+            let (h, t) = head(i);
+            (t.done, t.text.to_lowercase(), h, i)
+        }),
     }
     items.into_iter().map(|(i, _)| i).collect()
+}
+
+/// Lines to move for a filter expression (terms, all must match): see `select_matching`.
+pub fn select_for_move(lines: &[String], terms: &[String]) -> Vec<usize> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    select_matching(lines, |l| Filter::terms_match(terms, l))
+}
+
+/// Every line `matches` accepts together with its sub-entries (blank lines are skipped).
+pub fn select_matching<F: Fn(&str) -> bool>(lines: &[String], matches: F) -> Vec<usize> {
+    let mut picked = std::collections::BTreeSet::new();
+    for (i, l) in lines.iter().enumerate() {
+        if l.trim().is_empty() || picked.contains(&i) || !matches(l) {
+            continue;
+        }
+        let end = todotxt::subtree_end(lines, i);
+        picked.extend((i..=end).filter(|&j| !lines[j].trim().is_empty()));
+    }
+    picked.into_iter().collect()
 }
 
 /// (name, count) pairs, alphabetical. `pick` returns the names a task contributes.
@@ -154,3 +202,33 @@ where
 
 /// Lines removed from / added to a list between two versions (order-independent).
 pub use crate::davcache::{line_diff, reordered};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn sub_entries_stay_under_parent() {
+        let l = lines(&["(B) b +x", "- sub of b", "(A) a", "-- subsub of a? (orphan level 2)", "(C) c"]);
+        // priority sort: A group first, then B group, then C; children keep file order below their parent
+        let v = view(&l, Sort::Priority, true, &Filter::default());
+        assert_eq!(v, vec![2, 3, 0, 1, 4]);
+        let v = view(&l, Sort::Alpha, true, &Filter::default());
+        assert_eq!(v, vec![2, 3, 0, 1, 4]);
+        // a filter keeps the order and only shows the matching lines
+        let v = view(&l, Sort::Priority, true, &Filter::from_expr("sub"));
+        assert_eq!(v, vec![3, 1]);
+    }
+
+    #[test]
+    fn move_selection_takes_the_sub_tree() {
+        let l = lines(&["a +p", "- a1", "-- a11", "b", "- b1 +p", "c +p", "", "- c1"]);
+        let terms = vec!["+p".to_string()];
+        assert_eq!(select_for_move(&l, &terms), vec![0, 1, 2, 4, 5, 7]);
+        assert!(select_for_move(&l, &[]).is_empty());
+    }
+}

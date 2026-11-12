@@ -48,6 +48,15 @@ pub fn highlight(text: &str, prefix: bool) -> Vec<(String, Tok)> {
     let mut out = Vec::new();
     let mut rest = text;
     let mut first = true;
+    // sub-entry prefix `- ` .. `---- `
+    if prefix {
+        let n = text.bytes().take_while(|&b| b == b'-').count();
+        if (1..=4).contains(&n) && text.as_bytes().get(n) == Some(&b' ') {
+            out.push((text[..n].to_string(), Tok::Date));
+            out.push((" ".to_string(), Tok::Plain));
+            rest = &text[n + 1..];
+        }
+    }
     while !rest.is_empty() {
         let span = rest.find('`').and_then(|a| {
             let close = rest[a + 1..].find('`')?;
@@ -135,6 +144,8 @@ mod tests {
         assert_eq!(kinds("see http://x.y")[1], Tok::Plain);
         assert_eq!(kinds("run `ls -la +x` now"), vec![Tok::Plain, Tok::Code, Tok::Plain]);
         assert_eq!(kinds("open `unclosed +x"), vec![Tok::Plain, Tok::Plain, Tok::Project]);
+        assert_eq!(kinds("-- (A) sub")[..2], [Tok::Date, Tok::Priority('A')]);
+        assert_eq!(highlight("-- (A) sub", true).into_iter().map(|(t, _)| t).collect::<String>(), "-- (A) sub");
         // concatenating the pieces gives the original text back
         let s = "  (B)  a  +b ";
         assert_eq!(highlight(s, true).into_iter().map(|(t, _)| t).collect::<String>(), s);

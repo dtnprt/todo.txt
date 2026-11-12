@@ -135,6 +135,12 @@ export function deleteWord(e, input) {
 /** Colour-coded spans for priority, done marker, dates, +tags, @contexts, due and key:value words. */
 export function highlight(text) {
   const frag = document.createDocumentFragment();
+  // sub-entry prefix `- ` .. `---- ` (same width as typed, only coloured)
+  const lm = /^(-{1,4}) /.exec(text);
+  if (lm) {
+    frag.append(el('span', { className: 'tk-date', textContent: lm[1] }), ' ');
+    text = text.slice(lm[0].length);
+  }
   // `code` spans (may contain spaces): colour only, so the overlay keeps the input's font metrics
   text.split(/(`[^`\n]+`)/).forEach((seg, k) => {
     if (k % 2) frag.append(el('span', { className: 'tk-code', textContent: seg }));
