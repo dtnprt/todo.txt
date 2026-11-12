@@ -1,0 +1,66 @@
+/* Deep Sea: bioluminescence. Abyss gradient, glowing plankton drifting upwards, cyan/jade/magenta glow. Pure CSS, no images. */
+:root {
+  --bg: #02101c;
+  --panel: rgba(4, 28, 44, .62);
+  --hover: rgba(40, 220, 200, .10);
+  --line: rgba(60, 220, 210, .22);
+  --text: #cfeeea;
+  --muted: #6fa6a8;
+  --accent: #27e0c8;
+  --accent-text: #021014;
+  --danger: #ff5d8f;
+  --warn: #ffb86b;
+  --ok: #4fe3a0;
+  --pA: #ff5d8f;
+  --pB: #ffb86b;
+  --pC: #4fe3a0;
+  --pD: #5db8ff;
+  --pX: #4d7b82;
+  --due-soon: #f4e06a;
+  --due-today: #ffa24d;
+  --due-over: #ff5d8f;
+  color-scheme: dark;
+  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-size: 15px;
+  --bg-image:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(39, 224, 200, .22), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 90% 110%, rgba(255, 93, 143, .14), transparent 70%),
+    linear-gradient(180deg, #05263a 0%, #031a2b 40%, #010a12 100%);
+}
+body.theme-deep-sea .topbar, body.theme-deep-sea .status { background: rgba(2, 16, 28, .55); backdrop-filter: blur(8px); border-color: var(--line); }
+body.theme-deep-sea .tasks, body.theme-deep-sea .sidebar, body.theme-deep-sea .composer-box { backdrop-filter: blur(8px); border-color: var(--line); border-radius: 14px; box-shadow: 0 0 24px -8px rgba(39, 224, 200, .35), inset 0 0 18px -12px rgba(39, 224, 200, .5); }
+body.theme-deep-sea .sidebar { padding: 12px 14px; }
+body.theme-deep-sea .dd-menu, body.theme-deep-sea .ac, body.theme-deep-sea .help-box { background: rgba(3, 22, 36, .94); border: 1px solid var(--line); box-shadow: 0 0 22px -6px rgba(39, 224, 200, .45); border-radius: 12px; }
+body.theme-deep-sea .chip.project { text-shadow: 0 0 8px rgba(39, 224, 200, .7); }
+body.theme-deep-sea .chip.context { text-shadow: 0 0 8px rgba(79, 227, 160, .6); }
+body.theme-deep-sea .task:hover { background: rgba(39, 224, 200, .08); }
+body.theme-deep-sea button.primary { background: linear-gradient(90deg, #12b8a6, #27e0c8); color: #021014; border-color: transparent; box-shadow: 0 0 16px rgba(39, 224, 200, .5); }
+body.theme-deep-sea .topbar h1 { text-shadow: 0 0 12px rgba(39, 224, 200, .6); }
+body.theme-deep-sea .dav-corner { opacity: .7; }
+
+/* plankton: two layers of glowing specks rising at different speeds, behind the content */
+body.theme-deep-sea::before, body.theme-deep-sea::after { content: ""; position: fixed; left: 0; right: 0; top: -300px; bottom: 0; pointer-events: none; z-index: 0; background-repeat: repeat; }
+body.theme-deep-sea::before {
+  background-image:
+    radial-gradient(circle, rgba(120, 255, 235, .9) 0 1.5px, transparent 3px),
+    radial-gradient(circle, rgba(120, 220, 255, .7) 0 1px, transparent 2.5px),
+    radial-gradient(circle, rgba(255, 140, 190, .6) 0 1.5px, transparent 3px);
+  background-size: 210px 260px, 330px 310px, 470px 420px;
+  background-position: 20px 40px, 130px 170px, 260px 90px;
+  filter: drop-shadow(0 0 4px rgba(80, 255, 230, .8));
+  animation: ds-rise-a 70s linear infinite;
+}
+body.theme-deep-sea::after {
+  background-image:
+    radial-gradient(circle, rgba(160, 255, 240, .55) 0 1px, transparent 2.5px),
+    radial-gradient(circle, rgba(200, 160, 255, .5) 0 1.5px, transparent 3px);
+  background-size: 150px 190px, 260px 240px;
+  background-position: 60px 20px, 190px 120px;
+  filter: blur(.6px) drop-shadow(0 0 3px rgba(120, 255, 240, .6));
+  animation: ds-rise-b 110s linear infinite, ds-pulse 6s ease-in-out infinite;
+}
+@keyframes ds-rise-a { from { transform: translateY(0); } to { transform: translateY(-260px); } }
+@keyframes ds-rise-b { from { transform: translateY(0); } to { transform: translateY(-190px); } }
+@keyframes ds-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.theme-deep-sea::before, body.theme-deep-sea::after { animation: none; } }
+body.theme-deep-sea .layout { position: relative; z-index: 1; }

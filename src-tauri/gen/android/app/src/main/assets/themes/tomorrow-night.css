@@ -1,0 +1,23 @@
+/* Tomorrow Night - a complete theme in one file (system fonts). */
+:root {
+  --bg: #1d1f21;
+  --panel: #161719;
+  --hover: #282a2e;
+  --line: #373b41;
+  --text: #c5c8c6;
+  --muted: #969896;
+  --accent: #81a2be;
+  --accent-text: #1d1f21;
+  --danger: #cc6666;
+  --warn: #de935f;
+  --ok: #b5bd68;
+  --pA: #cc6666;
+  --pB: #de935f;
+  --pC: #f0c674;
+  --pD: #b5bd68;
+  --pX: #6a6c6a;
+  --due-soon: #f0c674;
+  --due-today: #de935f;
+  --due-over: #cc6666;
+  color-scheme: dark;
+}

@@ -1,0 +1,23 @@
+/* Nord (dark, Polar Night) - a complete theme in one file (system fonts). */
+:root {
+  --bg: #2e3440;
+  --panel: #3b4252;
+  --hover: #434c5e;
+  --line: #4c566a;
+  --text: #eceff4;
+  --muted: #a3adc0;
+  --accent: #88c0d0;
+  --accent-text: #2e3440;
+  --danger: #bf616a;
+  --warn: #d08770;
+  --ok: #a3be8c;
+  --pA: #bf616a;
+  --pB: #d08770;
+  --pC: #ebcb8b;
+  --pD: #a3be8c;
+  --pX: #4c566a;
+  --due-soon: #ebcb8b;
+  --due-today: #d08770;
+  --due-over: #bf616a;
+  color-scheme: dark;
+}

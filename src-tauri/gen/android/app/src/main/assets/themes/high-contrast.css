@@ -1,0 +1,32 @@
+/* High contrast: black / white / yellow, strong borders */
+:root {
+  --bg: #000000;
+  --panel: #000000;
+  --hover: #262626;
+  --line: #ffffff;
+  --text: #ffffff;
+  --muted: #d0d0d0;
+  --accent: #ffff00;
+  --accent-text: #000000;
+  --danger: #ff6b6b;
+  --warn: #ffb000;
+  --ok: #00ff7f;
+  --pA: #ff6b6b;
+  --pB: #ffb000;
+  --pC: #ffff00;
+  --pD: #00ffff;
+  --pX: #d0d0d0;
+  --due-soon: #ffff00;
+  --due-today: #ffb000;
+  --due-over: #ff6b6b;
+  color-scheme: dark;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 17px;
+}
+
+body.theme-high-contrast .tasks, body.theme-high-contrast .composer-box, body.theme-high-contrast .sidebar, body.theme-high-contrast .dd-menu,
+body.theme-high-contrast .ac, body.theme-high-contrast .help-box { border: 2px solid #fff; }
+body.theme-high-contrast button, body.theme-high-contrast input[type=text], body.theme-high-contrast select, body.theme-high-contrast textarea { border: 2px solid #fff; }
+body.theme-high-contrast button:hover:not(:disabled) { background: #ffff00; color: #000; }
+body.theme-high-contrast :focus-visible { outline: 3px solid #ffff00; outline-offset: 2px; }
+body.theme-high-contrast .task { border-bottom: 1px solid #fff; }

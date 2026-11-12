@@ -1,0 +1,65 @@
+/* Space Invaders - black screen, phosphor green, pixel invaders marching in the background. System monospace font only. */
+:root {
+  --bg: #000000;
+  --panel: #04120a;
+  --hover: #0a2a14;
+  --line: #1c7a3a;
+  --text: #b8ffcb;
+  --muted: #5fae78;
+  --accent: #33ff66;
+  --accent-text: #000000;
+  --danger: #ff3b3b;
+  --warn: #ffd23f;
+  --ok: #33ff66;
+  --pA: #ff3b3b;
+  --pB: #ffd23f;
+  --pC: #33ff66;
+  --pD: #3fc8ff;
+  --pX: #5fae78;
+  color-scheme: dark;
+  --font: 'Consolas', 'Lucida Console', 'DejaVu Sans Mono', monospace;
+  --font-size: 14px;
+}
+
+body.theme-space-invaders {
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='140' viewBox='0 0 200 140'%3E%3Crect x='28' y='20' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='20' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='32' y='24' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='48' y='24' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='28' y='28' width='28' height='4' fill='%2333ff66'/%3E%3Crect x='24' y='32' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='36' y='32' width='12' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='32' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='20' y='36' width='44' height='4' fill='%2333ff66'/%3E%3Crect x='20' y='40' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='28' y='40' width='28' height='4' fill='%2333ff66'/%3E%3Crect x='60' y='40' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='20' y='44' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='28' y='44' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='44' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='60' y='44' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='32' y='48' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='44' y='48' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='142' y='18' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='138' y='22' width='16' height='4' fill='%2333ff66'/%3E%3Crect x='134' y='26' width='24' height='4' fill='%2333ff66'/%3E%3Crect x='130' y='30' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='142' y='30' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='154' y='30' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='130' y='34' width='32' height='4' fill='%2333ff66'/%3E%3Crect x='138' y='38' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='150' y='38' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='134' y='42' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='142' y='42' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='154' y='42' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='130' y='46' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='138' y='46' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='150' y='46' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='158' y='46' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='90' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='48' y='94' width='16' height='4' fill='%2333ff66'/%3E%3Crect x='44' y='98' width='24' height='4' fill='%2333ff66'/%3E%3Crect x='40' y='102' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='102' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='64' y='102' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='40' y='106' width='32' height='4' fill='%2333ff66'/%3E%3Crect x='48' y='110' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='60' y='110' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='44' y='114' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='52' y='114' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='64' y='114' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='40' y='118' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='48' y='118' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='60' y='118' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='68' y='118' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='128' y='85' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='152' y='85' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='132' y='89' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='148' y='89' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='128' y='93' width='28' height='4' fill='%2333ff66'/%3E%3Crect x='124' y='97' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='136' y='97' width='12' height='4' fill='%2333ff66'/%3E%3Crect x='152' y='97' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='120' y='101' width='44' height='4' fill='%2333ff66'/%3E%3Crect x='120' y='105' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='128' y='105' width='28' height='4' fill='%2333ff66'/%3E%3Crect x='160' y='105' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='120' y='109' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='128' y='109' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='152' y='109' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='160' y='109' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='132' y='113' width='8' height='4' fill='%2333ff66'/%3E%3Crect x='144' y='113' width='8' height='4' fill='%2333ff66'/%3E%3C/svg%3E"), linear-gradient(#000, #000);
+  background-size: 200px 140px, 100% 100%;
+  background-repeat: repeat, no-repeat;
+  background-attachment: fixed;
+}
+
+/* the invaders march: sideways steps, like the original */
+body.theme-space-invaders::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ground line with the player's cannon */
+body.theme-space-invaders::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 32px;
+  border-top: 2px solid #33ff66;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='28' viewBox='0 0 52 28'%3E%3Crect x='24' y='0' width='4' height='4' fill='%2333ff66'/%3E%3Crect x='20' y='4' width='12' height='4' fill='%2333ff66'/%3E%3Crect x='20' y='8' width='12' height='4' fill='%2333ff66'/%3E%3Crect x='4' y='12' width='44' height='4' fill='%2333ff66'/%3E%3Crect x='0' y='16' width='52' height='4' fill='%2333ff66'/%3E%3Crect x='0' y='20' width='52' height='4' fill='%2333ff66'/%3E%3Crect x='0' y='24' width='52' height='4' fill='%2333ff66'/%3E%3C/svg%3E") 12% 2px no-repeat;
+  opacity: 0.35;
+  z-index: -1;
+  pointer-events: none;
+  animation: invaders-cannon 14s steps(28) infinite alternate;
+}
+
+@keyframes invaders-cannon {
+  from { background-position: 4% 2px; }
+  to   { background-position: 92% 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.theme-space-invaders::after { animation: none; }
+}

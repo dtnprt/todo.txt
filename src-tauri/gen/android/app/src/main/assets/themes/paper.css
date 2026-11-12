@@ -1,0 +1,31 @@
+/* Paper: quiet black on white, serif, almost no colour */
+:root {
+  --bg: #f7f5f0;
+  --panel: #ffffff;
+  --hover: #efece4;
+  --line: #d9d4c7;
+  --text: #222222;
+  --muted: #7a766c;
+  --accent: #222222;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --warn: #9a6700;
+  --ok: #2e7d32;
+  --pA: #b3261e;
+  --pB: #9a6700;
+  --pC: #555555;
+  --pD: #2e7d32;
+  --pX: #9a948a;
+  --due-soon: #555555;
+  --due-today: #9a6700;
+  --due-over: #b3261e;
+  color-scheme: light;
+  --font: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  --font-size: 17px;
+}
+
+body.theme-paper .tasks, body.theme-paper .composer-box, body.theme-paper .sidebar { border-radius: 2px; box-shadow: none; }
+body.theme-paper button, body.theme-paper input[type=text] { border-radius: 2px; }
+body.theme-paper .topbar, body.theme-paper .status { background: transparent; }
+
+body.theme-paper .dav-corner { color: var(--muted); opacity: 1; font-size: 13px; }

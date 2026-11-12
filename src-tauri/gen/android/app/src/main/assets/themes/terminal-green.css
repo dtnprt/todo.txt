@@ -1,0 +1,37 @@
+/* Terminal (green phosphor): monospace on black, square corners, faint scanlines */
+:root {
+  --bg: #000000;
+  --panel: #000000;
+  --hover: #33ff3322;
+  --line: #146b14;
+  --text: #33ff33;
+  --muted: #1fa81f;
+  --accent: #33ff33;
+  --accent-text: #000000;
+  --danger: #ff5555;
+  --warn: #ffb86c;
+  --ok: #33ff33;
+  --pA: #ff5555;
+  --pB: #ffb86c;
+  --pC: #33ff33;
+  --pD: #1fa81f;
+  --pX: #1fa81f;
+  --due-soon: #33ff33;
+  --due-today: #ffb86c;
+  --due-over: #ff5555;
+  color-scheme: dark;
+  --font: 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, 'Courier New', monospace;
+  --font-size: 15px;
+}
+
+body[class*="theme-terminal"] { text-shadow: 0 0 4px #33ff3355; }
+body[class*="theme-terminal"] *, body[class*="theme-terminal"] *::before, body[class*="theme-terminal"] *::after { border-radius: 0 !important; box-shadow: none !important; }
+body[class*="theme-terminal"]::after { content: ""; position: fixed; inset: 0; z-index: 1000; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, .18) 3px); }
+body[class*="theme-terminal"] .topbar, body[class*="theme-terminal"] .status { background: #000; border-color: #146b14; }
+body[class*="theme-terminal"] .tasks, body[class*="theme-terminal"] .composer-box, body[class*="theme-terminal"] .sidebar { border: 1px solid #146b14; }
+body[class*="theme-terminal"] button { border: 1px solid #146b14; }
+body[class*="theme-terminal"] button:hover:not(:disabled) { background: #33ff33; color: #000; }
+body[class*="theme-terminal"] .task:hover { background: #33ff3322; }
+body[class*="theme-terminal"] .composer .mode { color: #33ff33; }
+body[class*="theme-terminal"] input { caret-color: #33ff33; caret-shape: block; }

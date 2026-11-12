@@ -1,0 +1,32 @@
+/* Post-it (yellow sticky note) - a complete theme in one file. Handwriting font via system fallbacks (Segoe Print / Bradley Hand / Comic Sans), no embedded font. */
+:root {
+  --bg: #e9d46a;
+  --panel: #fff176;
+  --hover: #ffe94d;
+  --line: #d9c24a;
+  --text: #3b3a1e;
+  --muted: #7a7440;
+  --accent: #e0457b;
+  --accent-text: #ffffff;
+  --danger: #c62828;
+  --warn: #b45f06;
+  --ok: #2e7d32;
+  --pA: #c62828;
+  --pB: #e65100;
+  --pC: #8d6e00;
+  --pD: #2e7d32;
+  --pX: #7a7440;
+  color-scheme: light;
+  --font: 'Segoe Print', 'Bradley Hand', 'Chilanka', 'Comic Sans MS', 'Comic Neue', cursive;
+  --font-size: 15px;
+  /* a desk/cork-like warm surface behind the notes */
+  --bg-image: radial-gradient(ellipse 70% 60% at 50% 0%, rgba(255,255,255,.35), transparent 70%), repeating-linear-gradient(0deg, rgba(0,0,0,.025) 0 2px, transparent 2px 4px);
+}
+
+/* the task list is the note: faint ruled lines, soft shadow, slight tilt-free paper curl */
+.tasks { box-shadow: 0 10px 18px -6px rgba(0,0,0,.35), 0 2px 0 rgba(0,0,0,.05); border-color: #e3cd4a; border-radius: 2px;
+  background-image: linear-gradient(180deg, rgba(255,255,255,.25), transparent 14%); }
+.topbar, .status { box-shadow: 0 2px 6px rgba(0,0,0,.18); }
+.composer-box { box-shadow: 0 4px 10px -4px rgba(0,0,0,.35); border-radius: 2px; }
+.dd-menu, .ac { background: #fff59d; box-shadow: 0 8px 16px rgba(0,0,0,.3); border-radius: 2px; }
+button { border-radius: 3px; }

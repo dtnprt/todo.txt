@@ -1,0 +1,28 @@
+/* OLED: pure black background (pixels off), soft white text, dim grey lines - easy on the eyes and the battery */
+:root {
+  --bg: #000000;
+  --panel: #000000;
+  --hover: #151515;
+  --line: #2a2a2a;
+  --text: #d8d8d8;
+  --muted: #7d7d7d;
+  --accent: #4ea1ff;
+  --accent-text: #000000;
+  --danger: #ff5c5c;
+  --warn: #ffb347;
+  --ok: #5fd068;
+  --pA: #ff5c5c;
+  --pB: #ffb347;
+  --pC: #5fd068;
+  --pD: #4ea1ff;
+  --pX: #666666;
+  --due-soon: #f2d04a;
+  --due-today: #ff9a3c;
+  --due-over: #ff5c5c;
+  color-scheme: dark;
+  --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-size: 15px;
+}
+body.theme-oled .topbar, body.theme-oled .status, body.theme-oled .sidebar, body.theme-oled .tasks, body.theme-oled .composer-box { background: #000; }
+body.theme-oled .dd-menu, body.theme-oled .ac, body.theme-oled .help-box { background: #0b0b0b; border-color: #333; }
+body.theme-oled .dav-corner { opacity: .6; }

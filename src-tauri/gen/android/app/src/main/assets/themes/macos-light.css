@@ -1,0 +1,33 @@
+/* macOS light (system font, blur, soft shadows) */
+:root {
+  --bg: #f2f2f7;
+  --panel: rgba(255, 255, 255, .78);
+  --hover: rgba(0, 0, 0, .05);
+  --line: rgba(60, 60, 67, .18);
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --accent: #007aff;
+  --accent-text: #ffffff;
+  --danger: #ff3b30;
+  --warn: #ff9500;
+  --ok: #34c759;
+  --pA: #ff3b30;
+  --pB: #ff9500;
+  --pC: #ffcc00;
+  --pD: #34c759;
+  --pX: #8e8e93;
+  --due-soon: #ffcc00;
+  --due-today: #ff9500;
+  --due-over: #ff3b30;
+  color-scheme: light;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 15px;
+}
+
+body[class*="theme-macos"] { -webkit-font-smoothing: antialiased; }
+body[class*="theme-macos"] .topbar, body[class*="theme-macos"] .status { backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); }
+body[class*="theme-macos"] .tasks, body[class*="theme-macos"] .composer-box, body[class*="theme-macos"] .sidebar { backdrop-filter: blur(20px); border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 8px 24px rgba(0, 0, 0, .08); }
+body[class*="theme-macos"] button, body[class*="theme-macos"] input[type=text], body[class*="theme-macos"] select { border-radius: 8px; }
+body[class*="theme-macos"] .dd-menu, body[class*="theme-macos"] .ac { border-radius: 10px; backdrop-filter: blur(24px); box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
+body[class*="theme-macos"] .side-item { border-radius: 8px; }
+body[class*="theme-macos"] .pri-btn { border-radius: 8px; }
