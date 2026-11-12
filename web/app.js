@@ -17,6 +17,13 @@ const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 const hasDirPicker = 'showDirectoryPicker' in window;
 const TXT_FILTER = [{ name: 'Text files', extensions: ['txt'] }];
 const baseName = (p) => p.split(/[\\/]/).pop();
+/** Directory (local path or WebDAV folder URL, with trailing separator) of the active file; '' if unknown. */
+function curDir() {
+  const p = state.path;
+  if (p) { const m = /^(.*[\\/])[^\\/]*$/.exec(p); if (m) return m[1]; }
+  if (state.folder) return state.folder.replace(/[\\/]+$/, '') + (state.folder.includes('\\') ? '\\' : '/');
+  return '';
+}
 
 // One theme = one CSS file in web/themes/NAME.css (body class `theme-NAME`). To add a theme: drop the file there and add its name here.
 const THEMES = [];   // built-in themes were moved out of web/: see themes/ (bundled with the desktop app, loaded like own themes)
@@ -652,7 +659,7 @@ function moveDialog() {
   const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
 
   const filterIn = el('input', { type: 'text', className: 'move-in', value: pre.join(' '), placeholder: 'e.g. +ProjectName (all terms must match)', spellcheck: false });
-  const destIn = el('input', { type: 'text', className: 'move-in', placeholder: 'destination file (path or WebDAV URL; created if missing)', spellcheck: false });
+  const destIn = el('input', { type: 'text', className: 'move-in', value: curDir(), placeholder: 'destination file (path or WebDAV URL; created if missing)', spellcheck: false });
   const browse = el('button', { type: 'button', textContent: 'Browse…', onclick: async () => {
     const p = await tauri.dialog.save({ defaultPath: destIn.value || undefined, filters: TXT_FILTER });
     if (p) destIn.value = p;
@@ -689,7 +696,7 @@ function moveDialog() {
     const dest = destIn.value.trim();
     const idx = picked();
     if (!idx.length) return;
-    if (!dest) { err.textContent = 'Choose the destination file.'; return; }
+    if (!dest || /[\\/]$/.test(dest)) { err.textContent = 'Add a file name to the destination folder (e.g. ' + (dest || '') + 'other.txt).'; return; }
     if (state.path && dest.replace(/\\/g, '/').toLowerCase() === state.path.replace(/\\/g, '/').toLowerCase()) { err.textContent = 'The destination is the open file.'; return; }
     go.disabled = true;
     try {
@@ -713,7 +720,9 @@ function moveDialog() {
       el('div', { className: 'set-hint', textContent: 'Tasks matching the filter are removed from this list and appended to the destination file, together with their sub-entries.' }),
       el('label', { className: 'move-label', textContent: 'Filter' }), filterIn, chips,
       info, preview,
-      el('label', { className: 'move-label', textContent: 'Destination' }), el('div', { className: 'move-row' }, destIn, browse),
+      el('label', { className: 'move-label', textContent: 'Destination' }),
+      el('div', { className: 'set-hint', title: curDir(), textContent: 'Current folder: ' + (curDir() || '(unknown)') }),
+      el('div', { className: 'move-row' }, destIn, browse),
       err,
       el('div', { className: 'diff-actions' }, go, el('button', { type: 'button', textContent: 'Cancel', onclick: close }))));
   filterIn.addEventListener('input', update);
