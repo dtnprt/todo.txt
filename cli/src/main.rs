@@ -181,6 +181,10 @@ struct Cli {
     #[arg(long, value_name = "on|off")]
     encrypt_file: Option<String>,
 
+    /// List the known folders (folders with a hidden `.todo.txt`) with their encryption settings
+    #[arg(long)]
+    folders: bool,
+
     /// List the recent files (the last 20 opened by any client, known or not)
     #[arg(long)]
     recent: bool,
@@ -189,7 +193,7 @@ struct Cli {
     #[arg(long)]
     files: bool,
 
-    /// With -f: remember the file (default + known files) even if it is outside the folder of the remembered one
+    /// With -f: remember the folder of the file (creates a hidden `.todo.txt` folder there and adds the file to the known files)
     #[arg(short = 'K', long)]
     keep: bool,
 
@@ -213,6 +217,7 @@ fn is_known(cfg: &Config, p: &std::path::Path) -> bool {
         || cfg.files.iter().any(|f| norm(f) == norm(p))
         || cfg.file.as_ref().is_some_and(|f| norm(f) == norm(p))
         || cfg.folder.as_ref().is_some_and(|d| folder::is_inside(d, p))
+        || p.parent().is_some_and(crypt::has_todo_dir)   // a local file is known once its folder has a `.todo.txt`
 }
 
 /// ("cloud" | "git" | "local", encrypted?) of a known file.
@@ -226,7 +231,7 @@ fn file_kind(p: &std::path::Path) -> (&'static str, Option<bool>) {
 }
 
 fn crypt_switches(cli: &Cli) -> bool {
-    cli.encrypt.is_some() || cli.encrypt_file.is_some() || cli.files || cli.recent || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
+    cli.encrypt.is_some() || cli.encrypt_file.is_some() || cli.files || cli.recent || cli.folders || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
 }
 
 fn parse_on_off(name: &str, v: &str) -> Result<bool, String> {
@@ -274,6 +279,10 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
                         n += 1;
                     }
                 }
+                if let Some(dir) = path.parent().filter(|d| crypt::has_todo_dir(d)) {
+                    let t = crypt::todo_dir(dir);
+                    n += crypt::convert_flat(&t.join("notes"), old, new)? + crypt::convert_images(&t.join("images"), old, new)?;
+                }
                 n += crypt::convert_flat(&home.join(".todo.txt").join("notes"), old, new)?;
                 n += crypt::convert_images(&home.join(".todo.txt").join("images"), old, new)?;
             }
@@ -314,6 +323,40 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
         }
         crypt::set_session(Some(new));
         println!("password changed ({n} file(s) re-encrypted)");
+    }
+    if cli.folders {
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        let mut add = |d: PathBuf| {
+            if !dirs.contains(&d) {
+                dirs.push(d);
+            }
+        };
+        for p in cfg.files.iter().chain(cfg.recent.iter()).chain(cfg.file.iter()) {
+            if !webdav::is_remote(&p.to_string_lossy()) {
+                if let Some(d) = p.parent() {
+                    add(d.to_path_buf());
+                }
+            }
+        }
+        if let Some(f) = &cfg.folder {
+            if !folder::is_remote_dir(f) {
+                add(f.clone());
+            }
+        }
+        let mut n = 0;
+        for d in dirs.into_iter().filter(|d| crypt::has_todo_dir(d)) {
+            let p = crypt::policy_of_dir(&d);
+            let git = if d.join(".git").exists() { "git" } else { "local" };
+            let default = match p.default { Some(true) => "encrypt all", Some(false) => "plain", None => "no default" };
+            let mut extra = String::new();
+            if !p.plain.is_empty() { extra.push_str(&format!(" · not encrypted: {}", p.plain.join(", "))); }
+            if !p.encrypted.is_empty() { extra.push_str(&format!(" · encrypted: {}", p.encrypted.join(", "))); }
+            println!("{git:<6} {} ({default}{extra})", d.display());
+            n += 1;
+        }
+        if n == 0 {
+            println!("no known folders yet (a folder becomes known when it has a hidden .todo.txt folder: todo -f FILE --keep)");
+        }
     }
     if cli.recent {
         for (i, p) in cfg.recent.iter().enumerate() {
@@ -589,11 +632,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     };
     // `-f FILE` outside the folder of the remembered file (e.g. a todo.txt in another git repository) is used for
     // this run only: not stored as `file=`, not added to the known files. Use `todo -F PATH` or `--keep` to remember it.
+    let path_is_remote = webdav::is_remote(&path.to_string_lossy());
+    if cli.keep && !path_is_remote && folder.is_none() {
+        // "remember this folder": a hidden `.todo.txt` in the folder of the list makes it a known folder
+        if let Some(dir) = path.parent() {
+            crypt::ensure_todo_dir(dir)?;
+        }
+    }
     let one_off = cli.file.is_some()
-        && !cli.keep
         && folder.is_none()
+        && !path_is_remote            // a WebDAV file is always remembered
+        && !cli.keep
+        && !path.parent().is_some_and(crypt::has_todo_dir)   // local files are remembered once their folder has a `.todo.txt`
         && match &cfg.file {
-            Some(last) => switcher::dir_of(&last.to_string_lossy()) != switcher::dir_of(&path.to_string_lossy()) && (webdav::is_remote(&path.to_string_lossy()) || path.exists()),
+            Some(last) => switcher::dir_of(&last.to_string_lossy()) != switcher::dir_of(&path.to_string_lossy()) && path.exists(),
             None => false,
         };
     // started from `lastfile=` without -f: nothing was chosen, so `file=` / `folder=` stay as they are
@@ -697,7 +749,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         let name = match folder::note_name(&t) {
             Some(name) => name,
             None => {
-                let name = folder::next_note_name(&store.lines, folder.as_deref());
+                let name = folder::next_note_name(&store.lines, folder::notes_root(&path, folder.as_deref()).as_deref());
                 store.lines[i] = format!("{} note:{name}", store.lines[i]);
                 store.save(&path)?;
                 println!("{n}: {}", store.lines[i]);
@@ -712,7 +764,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
 
     // ---- interactive add ----
     if cli.add {
-        let ctx = folder::NoteCtx { todo: &path, folder: folder.as_deref(), lines: Store::load(&path)?.lines };
+        let nroot = folder::notes_root(&path, folder.as_deref());
+        let ctx = folder::NoteCtx { todo: &path, folder: nroot.as_deref(), lines: Store::load(&path)?.lines };
         match editor::edit_line("add> ", &text, ops::use_color(), Some(&ctx))? {
             None => println!("Cancelled."),
             Some(new) => {
@@ -737,7 +790,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         let i = store.index_of(n).ok_or_else(|| format!("no task at line {n}"))?;
         let old = store.lines[i].clone();
         let initial = if text.is_empty() { old.clone() } else { text.clone() };
-        let ctx = folder::NoteCtx { todo: &path, folder: folder.as_deref(), lines: store.lines.clone() };
+        let nroot = folder::notes_root(&path, folder.as_deref());
+        let ctx = folder::NoteCtx { todo: &path, folder: nroot.as_deref(), lines: store.lines.clone() };
         match editor::edit_line(&format!("{n}> "), &initial, ops::use_color(), Some(&ctx))? {
             None => println!("Cancelled."),
             Some(new) => {
@@ -989,7 +1043,7 @@ fn print_info(cfg: &Config, path: &std::path::Path, folder: Option<&std::path::P
         let files = folder::list_txt_files(d);
         println!("lists:      {} *.txt file(s) in the folder", files.len());
     }
-    println!("notes:      {}", folder::note_dir(folder).display());
+    println!("notes:      {}", folder::note_dir(folder::notes_root(path, folder).as_deref()).display());
     println!("backups:    {} (before archiving: {})", backup::backup_dir().display(), onoff(Some(backup::archive_backup_enabled()), true));
     println!(
         "encryption: {} · password {} · Windows Hello {}",

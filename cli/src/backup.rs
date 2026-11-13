@@ -38,7 +38,8 @@ fn keep_count() -> usize {
 }
 
 fn visible(name: &str) -> bool {
-    !name.starts_with('.')
+    // hidden files and folders (`.git` ...) are left out, but `.todo.txt` (settings, notes, images) is part of the data
+    !name.starts_with('.') || name == crate::crypt::DIR_NAME
 }
 
 /// All files below `dir` (not hidden, not `skip`) as (path, name inside the zip, using `/`).
@@ -78,6 +79,9 @@ pub fn files_for(todo: &Path, folder: Option<&Path>) -> io::Result<Vec<(PathBuf,
             let done = todo.with_file_name("done.txt");
             if done.exists() && done != todo {
                 out.push((done, "done.txt".into()));
+            }
+            if let Some(dir) = todo.parent().filter(|d| crate::crypt::has_todo_dir(d)) {
+                walk(&crate::crypt::todo_dir(dir), ".todo.txt", &skip, &mut out);
             }
             let base = crate::crypt::home().join(".todo.txt");
             walk(&base.join("notes"), "notes", &skip, &mut out);

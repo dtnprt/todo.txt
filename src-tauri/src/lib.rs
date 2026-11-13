@@ -96,24 +96,38 @@ fn list_txt_files(dir: String) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-/// Folder of the note files: `<folder>/note` in folder mode, else `~/.todo.txt/note`.
-fn note_path(folder: &Option<String>, name: &str) -> Result<PathBuf, String> {
+/// A note / image file of a list: `<root>/.todo.txt/<sub>/FILE` when the root has a `.todo.txt` folder, else `<folder>/<sub>/FILE`
+/// (folder mode, old layout), else `~/.todo.txt/<sub>/FILE`. Root = the todo folder (folder mode) or the folder of the list file.
+/// A file that still lives in the old place is found there.
+fn data_file(folder: &Option<String>, dir: &Option<String>, sub: &str, file: &str) -> PathBuf {
+    let folder_p = folder.as_deref().filter(|f| !f.is_empty()).map(Path::new);
+    let dir_p = dir.as_deref().filter(|d| !d.is_empty()).map(Path::new);
+    let root: Option<&Path> = folder_p.or_else(|| dir_p.filter(|d| crypt::has_todo_dir(d)));
+    let p = crypt::data_dir(root, true, sub).join(file);
+    if !p.exists() {
+        if let Some(r) = root.filter(|r| crypt::has_todo_dir(r)) {
+            let old = r.join(sub).join(file);
+            if old.exists() {
+                return old;
+            }
+        }
+    }
+    p
+}
+
+fn note_path(folder: &Option<String>, dir: &Option<String>, name: &str) -> Result<PathBuf, String> {
     let ok = !name.is_empty()
         && !name.starts_with('.')
         && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'));
     if !ok {
         return Err(format!("invalid note name '{name}'"));
     }
-    let dir = match folder.as_deref().filter(|f| !f.is_empty()) {
-        Some(f) => PathBuf::from(f).join("notes"),
-        None => home_dir().join(".todo.txt").join("notes"),
-    };
-    Ok(dir.join(format!("{name}.txt")))
+    Ok(data_file(folder, dir, "notes", &format!("{name}.txt")))
 }
 
 #[tauri::command]
-fn read_note(folder: Option<String>, name: String) -> Result<String, String> {
-    let p = note_path(&folder, &name)?;
+fn read_note(folder: Option<String>, dir: Option<String>, name: String) -> Result<String, String> {
+    let p = note_path(&folder, &dir, &name)?;
     match fs::read_to_string(&p) {
         Ok(t) => crypt::open(&t).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -122,8 +136,8 @@ fn read_note(folder: Option<String>, name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_note(folder: Option<String>, name: String, text: String) -> Result<(), String> {
-    let p = note_path(&folder, &name)?;
+fn write_note(folder: Option<String>, dir: Option<String>, name: String, text: String) -> Result<(), String> {
+    let p = note_path(&folder, &dir, &name)?;
     if text.is_empty() && !Path::new(&p).exists() {
         return Ok(()); // nothing to store
     }
@@ -134,23 +148,19 @@ fn write_note(folder: Option<String>, name: String, text: String) -> Result<(), 
     fs::write(&p, text).map_err(|e| e.to_string())
 }
 
-/// Pasted images: `<folder>/images/FILE` in folder mode, else `~/.todo.txt/images/FILE` (FILE = name with a picture extension).
-fn image_path(folder: &Option<String>, name: &str) -> Result<PathBuf, String> {
+/// Pasted images (FILE = name with a picture extension), see `data_file`.
+fn image_path(folder: &Option<String>, dir: &Option<String>, name: &str) -> Result<PathBuf, String> {
     let ext_ok = name.rsplit_once('.').is_some_and(|(_, e)| matches!(e.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"));
     let ok = ext_ok && !name.starts_with('.') && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'));
     if !ok {
         return Err(format!("invalid image name '{name}'"));
     }
-    let dir = match folder.as_deref().filter(|f| !f.is_empty()) {
-        Some(f) => PathBuf::from(f).join("images"),
-        None => home_dir().join(".todo.txt").join("images"),
-    };
-    Ok(dir.join(name))
+    Ok(data_file(folder, dir, "images", name))
 }
 
 #[tauri::command]
-fn write_image(folder: Option<String>, name: String, data: Vec<u8>) -> Result<(), String> {
-    let p = image_path(&folder, &name)?;
+fn write_image(folder: Option<String>, dir: Option<String>, name: String, data: Vec<u8>) -> Result<(), String> {
+    let p = image_path(&folder, &dir, &name)?;
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -159,13 +169,13 @@ fn write_image(folder: Option<String>, name: String, data: Vec<u8>) -> Result<()
 }
 
 #[tauri::command]
-fn read_image(folder: Option<String>, name: String) -> Result<Vec<u8>, String> {
-    crypt::read_file_auto(&image_path(&folder, &name)?).map_err(|e| e.to_string())
+fn read_image(folder: Option<String>, dir: Option<String>, name: String) -> Result<Vec<u8>, String> {
+    crypt::read_file_auto(&image_path(&folder, &dir, &name)?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_image(folder: Option<String>, name: String) -> Result<(), String> {
-    let p = image_path(&folder, &name)?;
+fn delete_image(folder: Option<String>, dir: Option<String>, name: String) -> Result<(), String> {
+    let p = image_path(&folder, &dir, &name)?;
     match fs::remove_file(&p) {
         Ok(()) => {
             if let Some(dir) = p.parent() {
@@ -229,8 +239,8 @@ fn export_themes(files: Vec<(String, String)>) -> Result<(usize, usize), String>
 }
 
 #[tauri::command]
-fn delete_note(folder: Option<String>, name: String) -> Result<(), String> {
-    let p = note_path(&folder, &name)?;
+fn delete_note(folder: Option<String>, dir: Option<String>, name: String) -> Result<(), String> {
+    let p = note_path(&folder, &dir, &name)?;
     match fs::remove_file(&p) {
         Ok(()) => {
             if let Some(dir) = p.parent() {
@@ -289,6 +299,8 @@ struct FileInfo {
     /// Is the list stored encrypted? None = unknown (nothing cached for a remote list) or the file does not exist.
     encrypted: Option<bool>,
     exists: bool,
+    /// WebDAV lists always; a local list once its folder has a `.todo.txt`.
+    known: bool,
 }
 
 #[tauri::command]
@@ -299,11 +311,11 @@ async fn file_info(paths: Vec<String>) -> Result<Vec<FileInfo>, String> {
             .map(|p| {
                 if webdav::is_remote(&p) {
                     let enc = davcache::cached_encrypted(&p);
-                    return FileInfo { path: p, kind: "cloud", encrypted: enc, exists: true };
+                    return FileInfo { path: p, kind: "cloud", encrypted: enc, exists: true, known: true };
                 }
                 let path = Path::new(&p);
                 let git = path.parent().is_some_and(|d| d.join(".git").exists());
-                FileInfo { kind: if git { "git" } else { "local" }, encrypted: crypt::file_state(path), exists: path.exists(), path: p }
+                FileInfo { kind: if git { "git" } else { "local" }, encrypted: crypt::file_state(path), exists: path.exists(), known: path.parent().is_some_and(crypt::has_todo_dir), path: p }
             })
             .collect()
     })
@@ -359,6 +371,73 @@ async fn crypt_set_dir(dir: String, entry: Option<String>, encrypt: bool) -> Res
             return webdav::write_remote_policy(&s, &dir, &p).map_err(|e| e.to_string());
         }
         crypt::set_dir_policy(Path::new(&dir), encrypt).map_err(|e| e.to_string())
+    })
+    .await?
+}
+
+#[derive(serde::Serialize)]
+struct FolderInfo {
+    dir: String,
+    /// "cloud" | "git" | "local"
+    kind: &'static str,
+    /// The `encrypt=` default of the folder (None = not set).
+    default: Option<bool>,
+    plain: Vec<String>,
+    encrypted: Vec<String>,
+}
+
+/// The known folders among `dirs` (pairs: folder path or WebDAV folder URL, WebDAV server entry): those that have a hidden
+/// `.todo.txt` folder with a config.
+#[tauri::command]
+async fn folders_info(dirs: Vec<(String, Option<String>)>) -> Result<Vec<FolderInfo>, String> {
+    blocking(move || {
+        let mut out: Vec<FolderInfo> = Vec::new();
+        for (d, entry) in dirs {
+            if out.iter().any(|f| f.dir == d) {
+                continue;
+            }
+            if webdav::is_remote(&d) {
+                let Some(s) = entry.as_deref().and_then(|e| server(e).ok()) else { continue };
+                if !webdav::remote_has_config(&s, &d) {
+                    continue;
+                }
+                let p = webdav::remote_policy(&s, &d);
+                out.push(FolderInfo { dir: d, kind: "cloud", default: p.default, plain: p.plain, encrypted: p.encrypted });
+            } else {
+                let path = Path::new(&d);
+                if !crypt::has_todo_dir(path) {
+                    continue;
+                }
+                let p = crypt::policy_of_dir(path);
+                let git = path.join(".git").exists();
+                out.push(FolderInfo { dir: d, kind: if git { "git" } else { "local" }, default: p.default, plain: p.plain, encrypted: p.encrypted });
+            }
+        }
+        out
+    })
+    .await
+}
+
+/// "Remember this folder": create the hidden `.todo.txt` folder (with its config) in a local folder or on the server.
+#[tauri::command]
+async fn remember_folder(dir: String, entry: Option<String>) -> Result<(), String> {
+    blocking(move || -> Result<(), String> {
+        if webdav::is_remote(&dir) {
+            let s = server(entry.as_deref().ok_or("no WebDAV server")?)?;
+            let p = webdav::remote_policy(&s, &dir);
+            return webdav::write_remote_policy(&s, &dir, &p).map_err(|e| e.to_string());
+        }
+        crypt::ensure_todo_dir(Path::new(&dir)).map_err(|e| e.to_string())
+    })
+    .await?
+}
+
+/// Where notes / images of a list on a WebDAV server live (`.todo.txt/<sub>/` when the folder is a known folder).
+#[tauri::command]
+async fn webdav_data_dir(entry: String, url: String, sub: String) -> Result<String, String> {
+    blocking(move || -> Result<String, String> {
+        let s = server(&entry)?;
+        Ok(webdav::remote_data_dir(&s, &webdav::parent(&url), &sub))
     })
     .await?
 }
@@ -478,6 +557,12 @@ async fn crypt_convert(folder: Option<String>, files: Vec<String>, encrypt: bool
                     let p = Path::new(f);
                     if p.exists() && crypt::convert_file(p, old.as_deref(), new).map_err(e)? {
                         n += 1;
+                    }
+                }
+                for f in &files {
+                    if let Some(d) = Path::new(f).parent().filter(|d| crypt::has_todo_dir(d)) {
+                        let t = crypt::todo_dir(d);
+                        n += crypt::convert_flat(&t.join("notes"), old.as_deref(), new).map_err(e)? + crypt::convert_images(&t.join("images"), old.as_deref(), new).map_err(e)?;
                     }
                 }
                 n += crypt::convert_flat(&home_dir().join(".todo.txt").join("notes"), old.as_deref(), new).map_err(e)?;
@@ -873,6 +958,9 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
                 backup_create,
+                folders_info,
+                remember_folder,
+                webdav_data_dir,
                 file_info,
                 crypt_policy_for,
                 crypt_set_file,
@@ -924,6 +1012,9 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
                 backup_create,
+                folders_info,
+                remember_folder,
+                webdav_data_dir,
                 file_info,
                 crypt_policy_for,
                 crypt_set_file,

@@ -504,7 +504,7 @@ body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 
 
 /* Normal mode: the framed list itself is the scroll container (frame and rounded corners stay in place) */
 body:not(.android) #listWrap { display: contents; }
-body:not(.android) #list { grid-column: 2; grid-row: 1; align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+body:not(.android) #list { grid-column: 2; grid-row: 1; align-self: start; max-height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; }   /* as high as its entries (the frame / note of a theme hugs them), scrolls when there are more than fit */
 body:not(.android) .layout.no-side #list { grid-column: 1; }
 @media (max-width: 720px) { body:not(.android) .layout #list { grid-column: 1; } }
 
@@ -601,3 +601,9 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
 .recent-item small { color: var(--muted); margin-left: auto; padding-left: 12px; }
 .recent-clear { border: 0; background: none; text-align: left; padding: 4px 8px; color: var(--muted); }
 .sub-caret { margin-left: auto; }
+
+/* Minimal mode = the normal layout without top bar and status bar: the input bar sits below the list (in the layout, always
+   visible), nothing floats over the entries any more. */
+body:not(.android).minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1 !important; transform: none !important; pointer-events: auto !important; z-index: auto; }
+body:not(.android).minimal .layout { padding-bottom: 0; }
+body:not(.android).minimal #list > .task:last-child { margin-bottom: 0 !important; }

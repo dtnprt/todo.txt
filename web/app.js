@@ -326,6 +326,7 @@ function loadText(text, name, handle = null, path = null, etag = null) {
     if (isTauri && !isAndroid) {
       if (!state.opened.includes(path)) state.opened.push(path);
       pushRecent(path);
+      autoKnown(path);
     }
   }
   diskText = path || handle ? text : null;
@@ -725,7 +726,7 @@ const knownPaths = () => {
 
 async function refreshFileInfo(force = false) {
   if (!isTauri || isAndroid) return;
-  const paths = [...new Set([...menuPaths(), ...state.recent])];
+  const paths = [...new Set([...menuPaths(), ...state.files, ...state.recent])];
   const key = paths.join('\n');
   if (!force && key === fileInfoKey && Date.now() - fileInfoAt < 10000) return;
   fileInfoKey = key;
@@ -733,7 +734,8 @@ async function refreshFileInfo(force = false) {
   try {
     const list = await invoke('file_info', { paths });
     const next = Object.fromEntries(list.map((i) => [i.path, i]));
-    if (JSON.stringify(next) !== JSON.stringify(fileInfo)) { fileInfo = next; renderFileList(); renderKnownFiles(); renderRecent(); }
+    if (JSON.stringify(next) !== JSON.stringify(fileInfo)) { fileInfo = next; renderFileList(); renderKnownFiles(); renderRecent(); renderKnownMenu(); }
+    refreshFolderInfo();
   } catch { /* keep what we know */ }
 }
 
@@ -772,9 +774,10 @@ function renderKnownFiles() {
 // `state.opened`: every file opened in this window stays in the file menu until it is closed (the X), known or not.
 // `state.recent`: the last 20 files opened (known or not), newest first; stored in todo.cfg (`recent=`, shared with the terminal app).
 const MAX_RECENT = 20;
+// The file menu lists the files that are OPEN (opened in this window and not closed yet, plus the current one): known or not.
 const menuPaths = () => {
-  const out = knownPaths();
-  for (const p of state.opened) if (!out.includes(p)) out.push(p);
+  const out = [...state.opened];
+  if (state.path && !out.includes(state.path)) out.push(state.path);
   return out;
 };
 
@@ -800,6 +803,92 @@ function renderRecent() {
   else rows.push(el('hr', { className: 'file-sep' }), el('button', { role: 'menuitem', className: 'recent-clear', data: {}, textContent: 'Clear the list', onclick: () => { state.recent = []; setCfg('recent', '[]'); renderRecent(); } }));
   box.replaceChildren(...rows);
   refreshFileInfo();
+}
+
+// ---------- known folders ----------
+// A folder with a hidden `.todo.txt` folder (settings, notes, images; also on a WebDAV server) is a known folder. Local lists become
+// known once their folder is one; WebDAV lists are known as soon as they are opened.
+let folderInfo = [];
+let folderInfoKey = '';
+const listDir = () => (state.path && !isRemote(state.path) ? dirOf(state.path) : null);
+
+async function refreshFolderInfo(force = false) {
+  if (!isTauri || isAndroid) return;
+  const seen = new Map();
+  for (const p of [...menuPaths(), ...state.files, ...state.recent]) {
+    const remote = isRemote(p);
+    const d = remote ? davParent(p) : dirOf(p);
+    if (d && !seen.has(d)) seen.set(d, remote ? davEntry(p) || null : null);
+  }
+  if (state.folder && !seen.has(state.folder)) seen.set(state.folder, isRemote(state.folder) ? davEntry(state.folder) || null : null);
+  const dirs = [...seen.entries()];
+  const key = JSON.stringify(dirs);
+  if (!force && key === folderInfoKey) return;
+  folderInfoKey = key;
+  try {
+    const next = await invoke('folders_info', { dirs });
+    if (JSON.stringify(next) !== JSON.stringify(folderInfo)) { folderInfo = next; renderKnownFolders(); }
+  } catch { /* keep what we know */ }
+}
+
+function renderKnownFolders() {
+  const box = document.getElementById('knownFolders');
+  if (!box || !isTauri) return;
+  if (!folderInfo.length) { box.replaceChildren(el('span', { className: 'set-hint', textContent: 'No known folders yet. File → "Remember this folder" creates a hidden .todo.txt folder next to the list; WebDAV lists are known as soon as you open them.' })); return; }
+  box.replaceChildren(...folderInfo.map((f) => {
+    const dflt = f.default === true ? ['all files encrypted', 'lock'] : f.default === false ? ['plain text', 'lock-open'] : ['no default', 'circle-question'];
+    const except = [...(f.plain.length ? [`not encrypted: ${f.plain.join(', ')}`] : []), ...(f.encrypted.length ? [`encrypted: ${f.encrypted.join(', ')}`] : [])].join(' · ');
+    const entry = isRemote(f.dir) ? davEntry(f.dir) || null : null;
+    return el('div', { className: 'kf-row folder' },
+      el('i', { className: `fa-solid fa-${KIND_ICON[f.kind] || 'folder'} kf-kind`, title: KIND_LABEL[f.kind] }),
+      el('span', { className: 'kf-name', title: f.dir }, el('b', { textContent: isRemote(f.dir) ? f.dir : baseName(f.dir.replace(/[\\/]+$/, '')) || f.dir }), el('small', { textContent: (isRemote(f.dir) ? '' : f.dir + ' · ') + dflt[0] + (except ? ` · ${except}` : '') })),
+      el('button', { type: 'button', textContent: 'Encrypt all', disabled: f.default === true && !f.plain.length, title: 'Encrypt every list, note and image of this folder (experimental)', onclick: () => setFolderEncryption(f.dir, entry, true) }),
+      el('button', { type: 'button', textContent: 'Plain text', disabled: f.default === false && !f.encrypted.length, title: 'Store the files of this folder as plain text (readable by other apps)', onclick: () => setFolderEncryption(f.dir, entry, false) }));
+  }));
+}
+
+/** The whole folder (default in its `.todo.txt/config`; exceptions are dropped) and, locally, all its lists / notes / images. */
+async function setFolderEncryption(dir, entry, on) {
+  if (on && !(await uiConfirm('Encryption is EXPERIMENTAL. Encrypted files can no longer be read by other todo.txt apps, editors or scripts. Keep a backup.\n\nEncrypt every file of this folder?'))) return;
+  try {
+    const st = await invoke('crypt_status');
+    if (!st.unlocked) {
+      const a = await askPassword({ title: on ? 'Encrypt files' : 'Decrypt files', message: on ? 'Choose a password (or enter the one you already use). There is no way to recover it.' : 'Enter the password to decrypt the files.', confirm: on && !st.stored });
+      if (!a) return;
+      await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+      if (a.remember) await invoke('crypt_remember');
+    }
+    await withUnlock(() => invoke('crypt_set_dir', { dir, entry, encrypt: on }));
+    if (!isRemote(dir)) await withUnlock(() => invoke('crypt_convert', { folder: dir, files: [], encrypt: on, newPassword: null }));
+    else if (state.path && isRemote(state.path) && davParent(state.path) === dir) { state.dirty = true; await save(); }
+  } catch (e) { uiAlert(`Could not change the folder: ${e}`); }
+  refreshFolderInfo(true);
+  refreshFileInfo(true);
+}
+
+/** A list becomes a known file: WebDAV lists as soon as they are opened, local ones once their folder has a `.todo.txt`. */
+async function autoKnown(path) {
+  if (!isTauri || isAndroid || !path || state.files.includes(path)) return;
+  let known = isRemote(path);
+  if (!known) {
+    try { known = !!(await invoke('file_info', { paths: [path] }))[0]?.known; } catch { known = false; }
+  }
+  if (known && !state.files.includes(path)) { state.files.push(path); saveFiles(); refreshFileInfo(true); }
+}
+
+/** File menu: the list of known files (submenu), next to the recent files. */
+function renderKnownMenu() {
+  const box = document.getElementById('knownList');
+  if (!box || !isTauri) return;
+  const rows = state.files.map((p) => {
+    const k = kindOf(p);
+    const b = el('button', { role: 'menuitem', className: 'recent-item', title: `${KIND_LABEL[k]}: ${p}`, onclick: async () => { closeMenus(); await switchFile(p); } },
+      el('i', { className: `fa-solid fa-${KIND_ICON[k]} file-kind` }), isRemote(p) ? davName(p) : baseName(p), el('small', {}, isRemote(p) ? davHost(p) : baseName(dirOf(p))));
+    if (p === state.path) b.setAttribute('aria-current', 'true');
+    return b;
+  });
+  if (!rows.length) rows.push(el('span', { className: 'side-empty', textContent: 'No known files yet' }));
+  box.replaceChildren(...rows);
 }
 
 /** Encrypt / decrypt one file (an exception in the `.todotxt.cfg` of its folder) and rewrite it now. */
@@ -1494,9 +1583,10 @@ async function cfgFile() {
  *  A file outside the folder of the remembered one (e.g. the todo.txt of another git repository) is only
  *  opened, never remembered, unless `force` (switching to a file from the list). */
 async function rememberFile(path, force = false) {
-  if (!force) {
-    const last = await cfgFile();
-    if (last && dirOf(last) !== dirOf(path)) return;
+  if (!force && !isRemote(path)) {   // a local file is remembered once its folder is a known folder (has a `.todo.txt`)
+    let known = false;
+    try { known = !!(await invoke('file_info', { paths: [path] }))[0]?.known; } catch { /* not known */ }
+    if (!known) return;
   }
   setCfg('file', path);
   lastSeenLast = path;
@@ -1551,11 +1641,17 @@ async function switchFile(p) {
   }
 }
 
+/** Close a file: it leaves the file menu (the known files stay untouched). */
+function closeFile(p) {
+  state.opened = state.opened.filter((f) => f !== p);
+  persist();
+  renderFileList();
+}
+
+/** Known files are edited in Settings -> Known files only. */
 function removeFromFiles(p) {
   state.files = state.files.filter((f) => f !== p);
-  state.opened = state.opened.filter((f) => f !== p);
   saveFiles();
-  persist();
   renderFileList();
 }
 
@@ -1592,7 +1688,7 @@ function renderFileList() {
         el('small', {}, isRemote(p) ? davHost(p) : baseName(dir)));
       pick.setAttribute('role', 'menuitemradio');
       pick.setAttribute('aria-checked', String(cur));
-      const rm = el('button', { className: 'file-rm', title: 'Close (remove from the list)', onclick: () => removeFromFiles(p) },
+      const rm = el('button', { className: 'file-rm', title: 'Close this file (known files stay known)', onclick: () => closeFile(p) },
         el('i', { className: 'fa-solid fa-xmark' }));
       rm.dataset.keep = '';
       return el('div', { className: 'file-row' }, pick, rm);
@@ -1748,20 +1844,20 @@ async function archiveDone() {
 
 const NOTE_KEY = 'todotxt.note.';
 const onDav = () => isTauri && isRemote(state.path);
-const noteUrl = (name) => davJoin(davParent(state.path) + 'notes/', `${name}.txt`);
+const noteUrl = async (name) => davJoin(await invoke('webdav_data_dir', { entry: davEntry(state.path), url: state.path, sub: 'notes' }), `${name}.txt`);
 
 async function readNote(name) {
   try {
-    if (onDav()) return (await withUnlock(() => invoke('webdav_get', { entry: davEntry(state.path), url: noteUrl(name) }))).text;
-    if (isTauri) return await withUnlock(() => invoke('read_note', { folder: state.folder, name }));
+    if (onDav()) return (await withUnlock(async () => invoke('webdav_get', { entry: davEntry(state.path), url: await noteUrl(name) }))).text;
+    if (isTauri) return await withUnlock(() => invoke('read_note', { folder: state.folder, dir: listDir(), name }));
     if (state.dirHandle) return await webDecode(await (await (await (await state.dirHandle.getDirectoryHandle('notes')).getFileHandle(`${name}.txt`)).getFile()).text());
     return await webDecode(localStorage.getItem(NOTE_KEY + name) || '');
   } catch (e) { if (isLockErr(e)) throw e; return ''; }
 }
 
 async function writeNote(name, text) {
-  if (onDav()) return withUnlock(() => invoke('webdav_put', { entry: davEntry(state.path), url: noteUrl(name), text, etag: null }));
-  if (isTauri) return withUnlock(() => invoke('write_note', { folder: state.folder, name, text }));
+  if (onDav()) return withUnlock(async () => invoke('webdav_put', { entry: davEntry(state.path), url: await noteUrl(name), text, etag: null }));
+  if (isTauri) return withUnlock(() => invoke('write_note', { folder: state.folder, dir: listDir(), name, text }));
   if (state.dirHandle) {
     const dir = await state.dirHandle.getDirectoryHandle('notes', { create: true });
     const h = await dir.getFileHandle(`${name}.txt`, { create: true });
@@ -1774,8 +1870,8 @@ async function writeNote(name, text) {
 
 async function deleteNoteFile(name) {
   try {
-    if (onDav()) await invoke('webdav_delete', { entry: davEntry(state.path), url: noteUrl(name) });
-    else if (isTauri) await invoke('delete_note', { folder: state.folder, name });
+    if (onDav()) await invoke('webdav_delete', { entry: davEntry(state.path), url: await noteUrl(name) });
+    else if (isTauri) await invoke('delete_note', { folder: state.folder, dir: listDir(), name });
     else if (state.dirHandle) await (await state.dirHandle.getDirectoryHandle('notes')).removeEntry(`${name}.txt`);
     else localStorage.removeItem(NOTE_KEY + name);
     gitChanged(`${name}.txt`);
@@ -1794,7 +1890,7 @@ const IMG_KEY = 'todotxt.image.';
 const imgFolder = () => (isRemote(state.path || '') ? null : state.folder);
 
 async function writeImage(name, blob) {
-  if (isTauri) return invoke('write_image', { folder: imgFolder(), name, data: Array.from(new Uint8Array(await blob.arrayBuffer())) });
+  if (isTauri) return invoke('write_image', { folder: imgFolder(), dir: listDir(), name, data: Array.from(new Uint8Array(await blob.arrayBuffer())) });
   if (state.dirHandle) {
     const dir = await state.dirHandle.getDirectoryHandle('images', { create: true });
     const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
@@ -1808,7 +1904,7 @@ async function writeImage(name, blob) {
 /** An object/data URL for the image, or null. */
 async function imageUrl(name) {
   try {
-    if (isTauri) return URL.createObjectURL(new Blob([new Uint8Array(await invoke('read_image', { folder: imgFolder(), name }))]));
+    if (isTauri) return URL.createObjectURL(new Blob([new Uint8Array(await invoke('read_image', { folder: imgFolder(), dir: listDir(), name }))]));
     if (state.dirHandle) return URL.createObjectURL(await webDecodeBytes(await (await (await state.dirHandle.getDirectoryHandle('images')).getFileHandle(name)).getFile()));
     return localStorage.getItem(IMG_KEY + name);
   } catch { return null; }
@@ -1819,7 +1915,7 @@ async function deleteImageOf(raw) {
   for (const name of T.imageNames(T.parse(raw))) {
     if (still.has(name)) continue;
     try {
-      if (isTauri) await invoke('delete_image', { folder: imgFolder(), name });
+      if (isTauri) await invoke('delete_image', { folder: imgFolder(), dir: listDir(), name });
       else if (state.dirHandle) await (await state.dirHandle.getDirectoryHandle('images')).removeEntry(name);
       else localStorage.removeItem(IMG_KEY + name);
       gitChanged(`images/${name}`);
@@ -2318,6 +2414,8 @@ function render() {
   $('#archive').disabled = !state.lines.some((l) => T.parse(l).done);
   $('#browserStorage').style.display = isTauri ? 'none' : '';
   $('#recentToggle').style.display = isTauri && !isAndroid ? '' : 'none';
+  $('#knownToggle').style.display = isTauri && !isAndroid ? '' : 'none';
+  if (!(isTauri && !isAndroid)) $('#knownList').hidden = true;
   if (!(isTauri && !isAndroid)) $('#recentList').hidden = true;
   $('#backupZip').style.display = isTauri && !isAndroid && state.path && !isRemote(state.path) ? '' : 'none';   // no save dialog on Android: its backups go to the backup folder when archiving
   $('#backupArchiveToggle').style.display = isTauri ? '' : 'none';
@@ -2797,7 +2895,7 @@ const settingsEl = $('#settings');
 function showTab(name) {
   if (name === 'webdav') dav.renderPane(settingsEl.querySelector('[data-pane=webdav]'));
   if (name === 'security') refreshSecurity();
-  if (name === 'files') { renderKnownFiles(); refreshFileInfo(true); }
+  if (name === 'files') { renderKnownFiles(); renderKnownFolders(); refreshFileInfo(true); refreshFolderInfo(true); }
   if (name === 'general' && isTauri) refreshBackupToggle();
   settingsEl.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   settingsEl.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== name; });
@@ -2984,8 +3082,24 @@ $('#saveAs').onclick = () => save({ as: true });
 $('#keepFile').style.display = isTauri ? '' : 'none';
 $('#keepFile').onclick = async () => {
   if (!state.path) return uiAlert('Save the list to a file first.');
-  await rememberFile(state.path, true);
+  const remote = isRemote(state.path);
+  try {
+    await invoke('remember_folder', { dir: remote ? davParent(state.path) : dirOf(state.path), entry: remote ? davEntry(state.path) || null : null });
+    await rememberFile(state.path, true);
+    if (!state.files.includes(state.path)) { state.files.push(state.path); saveFiles(); }
+  } catch (e) { return uiAlert(`Could not remember the folder: ${e}`); }
+  refreshFileInfo(true);
+  refreshFolderInfo(true);
   renderFileList();
+  uiAlert('This folder is now a known folder: it has a hidden .todo.txt folder for its settings, notes and images, and its lists are known files. Encryption of the folder can be set in Settings → Known files.');
+};
+$('#knownToggle').onclick = () => {
+  const list = $('#knownList');
+  const open = list.hidden;
+  list.hidden = !open;
+  $('#knownToggle').setAttribute('aria-expanded', String(open));
+  $('#knownToggle').querySelector('.sub-caret').className = `fa-solid fa-caret-${open ? 'down' : 'right'} sub-caret`;
+  if (open) renderKnownMenu();
 };
 $('#archive').onclick = archiveDone;
 $('#browserStorage').onclick = browserStorageDialog;

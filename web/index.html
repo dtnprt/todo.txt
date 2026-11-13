@@ -22,6 +22,8 @@
         <button id="new" role="menuitem"><i class="fa-solid fa-file" aria-hidden="true"></i> New</button>
         <button id="open" role="menuitem"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Open…</button>
         <button id="browserStorage" role="menuitem" title="Keep lists inside this browser (localStorage)"><i class="fa-solid fa-database" aria-hidden="true"></i> Browser storage…</button>
+        <button id="knownToggle" role="menuitem" aria-expanded="false" data-keep style="display:none"><i class="fa-solid fa-bookmark" aria-hidden="true"></i> Known files <i class="fa-solid fa-caret-right sub-caret" aria-hidden="true"></i></button>
+        <div id="knownList" class="recent-list" role="menu" hidden></div>
         <button id="recentToggle" role="menuitem" aria-expanded="false" data-keep style="display:none"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Recent files <i class="fa-solid fa-caret-right sub-caret" aria-hidden="true"></i></button>
         <div id="recentList" class="recent-list" role="menu" hidden></div>
         <button id="openFolder" role="menuitem"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i> Open folder…</button>
@@ -30,7 +32,7 @@
         <button id="refresh" role="menuitem"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> Reload from disk <kbd>Ctrl+R</kbd></button>
         <button id="save" role="menuitem"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save <kbd>Ctrl+S</kbd></button>
         <button id="saveAs" role="menuitem"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Save as…</button>
-        <button id="keepFile" role="menuitem" title="Add this file to the known files and make it the default (files opened from another folder are otherwise not remembered)"><i class="fa-solid fa-bookmark" aria-hidden="true"></i> Remember this file</button>
+        <button id="keepFile" role="menuitem" title="Create a hidden .todo.txt folder next to this list: the folder becomes a known folder (settings, notes, images, encryption) and its lists are known files"><i class="fa-solid fa-bookmark" aria-hidden="true"></i> Remember this folder</button>
         <button id="backupZip" role="menuitem" style="display:none" title="Save a .zip of the lists, notes and images (encrypted files stay encrypted)"><i class="fa-solid fa-file-zipper" aria-hidden="true"></i> Backup as .zip…</button>
         <button id="archive" role="menuitem"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Archive done tasks <kbd>F5</kbd></button>
       </div>
@@ -140,6 +142,10 @@
       <div class="set-pane" data-pane="files" hidden>
         <h3 class="set-sub">Known files</h3>
         <span class="set-hint">These files are in the file menu, and the terminal app follows the current file when it is a cloud (WebDAV) file or listed here. The icon shows where a file lives (cloud, git folder, local); the lock whether it is stored encrypted. Each folder keeps a hidden <b>.todotxt.cfg</b> that says what is encrypted there, so single files can stay readable for other apps.</span>
+        <h3 class="set-sub">Known folders</h3>
+        <span class="set-hint">A folder with a hidden <b>.todo.txt</b> folder is a known folder. Its settings (what is encrypted), notes and images live there, also on a WebDAV server.</span>
+        <div id="knownFolders" class="known-files"></div>
+        <h3 class="set-sub">Known files</h3>
         <div id="knownFiles" class="known-files"></div>
         <button id="addKnownFile"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add file…</button>
       </div>

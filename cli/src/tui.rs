@@ -443,7 +443,7 @@ impl App {
         let name = match folder::note_name(&t) {
             Some(n) => n,
             None => {
-                let n = folder::next_note_name(&self.store.lines, self.folder.as_deref());
+                let n = folder::next_note_name(&self.store.lines, folder::notes_root(&self.path, self.folder.as_deref()).as_deref());
                 let raw = format!("{} note:{n}", self.store.lines[i]);
                 self.replace_line(i, raw);
                 n
@@ -1488,7 +1488,7 @@ impl App {
                     Edited::Yes => {
                         self.on_input_changed();
                         if k.code == KeyCode::Char(':') && self.mode != Mode::Search && self.input.note_trigger() {
-                            let name = folder::next_note_name_with(&self.store.lines, &self.input.text, self.folder.as_deref());
+                            let name = folder::next_note_name_with(&self.store.lines, &self.input.text, folder::notes_root(&self.path, self.folder.as_deref()).as_deref());
                             self.open_note_edit(&name, true);
                         }
                     }

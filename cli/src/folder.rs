@@ -3,7 +3,6 @@
 //! Note live in `<folder>/notes/NAME.txt` in folder mode, otherwise in `~/.todo.txt/notes/NAME.txt`.
 //! Keep in sync with the Rust commands in `src-tauri/src/lib.rs` and with `web/app.js`.
 
-use crate::config::home_dir;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -133,16 +132,32 @@ pub fn pick_file(dir: &Path, remembered: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| join(dir, "todo.txt"))
 }
 
-/// Where the note files live.
-pub fn note_dir(folder: Option<&Path>) -> PathBuf {
-    match folder {
-        Some(f) => f.join("notes"),
-        None => home_dir().join(".todo.txt").join("notes"),
+/// The directory whose `.todo.txt` / `notes` hold the notes of a list: the todo folder in folder mode, else the folder of the list
+/// file when it is a known folder (has a `.todo.txt`); None = the global `~/.todo.txt/notes`.
+pub fn notes_root(todo: &Path, folder: Option<&Path>) -> Option<PathBuf> {
+    if let Some(f) = folder {
+        return Some(f.to_path_buf());
     }
+    todo.parent().filter(|d| !crate::webdav::is_remote(&todo.to_string_lossy()) && crate::crypt::has_todo_dir(d)).map(Path::to_path_buf)
 }
 
-pub fn note_file(folder: Option<&Path>, name: &str) -> PathBuf {
-    note_dir(folder).join(format!("{name}.txt"))
+/// Where the note files live: `<root>/.todo.txt/notes` when the root has a `.todo.txt`, else (old layout) `<root>/notes`, else `~/.todo.txt/notes`.
+pub fn note_dir(root: Option<&Path>) -> PathBuf {
+    crate::crypt::data_dir(root, true, "notes")
+}
+
+pub fn note_file(root: Option<&Path>, name: &str) -> PathBuf {
+    let p = note_dir(root).join(format!("{name}.txt"));
+    if !p.exists() {
+        // a note that still lives in the old place (`<folder>/notes`) is found there
+        if let Some(r) = root.filter(|r| crate::crypt::has_todo_dir(r)) {
+            let old = r.join("notes").join(format!("{name}.txt"));
+            if old.exists() {
+                return old;
+            }
+        }
+    }
+    p
 }
 
 /// A valid note name: letters, digits, `_ - .`, not starting with a dot.
@@ -254,7 +269,7 @@ impl NoteFile {
 pub fn prepare_note(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::Result<NoteFile> {
     let t = todo.to_string_lossy().into_owned();
     if !crate::webdav::is_remote(&t) {
-        let nf = NoteFile { local: ensure_note_file(folder, name)?, remote: None };
+        let nf = NoteFile { local: ensure_note_file(notes_root(todo, folder).as_deref(), name)?, remote: None };
         // an encrypted note that cannot be decrypted must not be opened (saving would overwrite it)
         let raw = fs::read_to_string(&nf.local).unwrap_or_default();
         if crate::crypt::is_encrypted(&raw) {
@@ -263,7 +278,7 @@ pub fn prepare_note(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::
         return Ok(nf);
     }
     let server = crate::store::server_of(todo)?;
-    let url = crate::webdav::join(&format!("{}notes/", crate::webdav::parent(&t)), &format!("{name}.txt"));
+    let url = crate::webdav::join(&crate::webdav::remote_data_dir(&server, &crate::webdav::parent(&t), "notes"), &format!("{name}.txt"));
     let text = match crate::webdav::get(&server, &url) {
         Ok((text, _)) => text,
         Err(crate::webdav::Error::NotFound) => String::new(),
@@ -347,11 +362,11 @@ pub fn remove_note(todo: &Path, folder: Option<&Path>, removed: &str, remaining:
         if remote {
             if let Ok(server) = crate::store::server_of(todo) {
                 let t = todo.to_string_lossy();
-                let _ = crate::webdav::delete(&server, &crate::webdav::join(&format!("{}notes/", crate::webdav::parent(&t)), &format!("{name}.txt")));
+                let _ = crate::webdav::delete(&server, &crate::webdav::join(&crate::webdav::remote_data_dir(&server, &crate::webdav::parent(&t), "notes"), &format!("{name}.txt")));
             }
             continue;
         }
-        let p = note_file(folder, &name);
+        let p = note_file(notes_root(todo, folder).as_deref(), &name);
         if fs::remove_file(&p).is_ok() {
             if let Some(dir) = p.parent() {
                 let _ = fs::remove_dir(dir); // only if empty

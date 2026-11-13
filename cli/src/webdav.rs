@@ -500,36 +500,66 @@ fn find_tag_close(lower: &str, name: &str, from: usize) -> Option<usize> {
     None
 }
 
-// ---------- per-folder encryption policy on the server (`.todotxt.cfg`) ----------
+// ---------- per-folder encryption policy on the server (`.todo.txt/config`) ----------
 
-static POLICIES: std::sync::Mutex<Vec<(String, std::time::Instant, crate::crypt::Policy)>> = std::sync::Mutex::new(Vec::new());
+static POLICIES: std::sync::Mutex<Vec<(String, std::time::Instant, crate::crypt::Policy, bool)>> = std::sync::Mutex::new(Vec::new());
 
-/// The policy file of a server folder (cached for 30 seconds; empty when there is none).
-pub fn remote_policy(server: &Server, dir_url: &str) -> crate::crypt::Policy {
+/// `<folder>/.todo.txt/` of a server folder URL.
+pub fn todo_dir_url(dir_url: &str) -> String {
+    let base = if dir_url.ends_with('/') { dir_url.to_string() } else { format!("{dir_url}/") };
+    format!("{base}{}/", crate::crypt::DIR_NAME)
+}
+
+/// (policy, has `.todo.txt/config`) of a server folder, cached for 30 seconds. An empty policy when there is none.
+fn remote_entry(server: &Server, dir_url: &str) -> (crate::crypt::Policy, bool) {
     {
         let c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, at, p)) = c.iter().find(|(u, _, _)| u == dir_url) {
+        if let Some((_, at, p, has)) = c.iter().find(|(u, _, _, _)| u == dir_url) {
             if at.elapsed() < Duration::from_secs(30) {
-                return p.clone();
+                return (p.clone(), *has);
             }
         }
     }
-    let p = match get_raw(server, &join(dir_url, crate::crypt::DIR_CFG)) {
-        Ok((t, _)) => crate::crypt::Policy::parse(&t),
-        Err(_) => crate::crypt::Policy::default(), // none (or the server is unreachable: no opinion)
+    let cfg_url = join(&todo_dir_url(dir_url), crate::crypt::DIR_CFG);
+    let (p, has) = match get_raw(server, &cfg_url) {
+        Ok((t, _)) => (crate::crypt::Policy::parse(&t), true),
+        // old layout: `.todotxt.cfg` next to the lists (read only)
+        Err(_) => match get_raw(server, &join(dir_url, ".todotxt.cfg")) {
+            Ok((t, _)) => (crate::crypt::Policy::parse(&t), false),
+            Err(_) => (crate::crypt::Policy::default(), false), // none (or the server is unreachable: no opinion)
+        },
     };
     let mut c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
-    c.retain(|(u, _, _)| u != dir_url);
-    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone()));
-    p
+    c.retain(|(u, _, _, _)| u != dir_url);
+    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone(), has));
+    (p, has)
 }
 
-/// Write the policy file of a server folder.
+/// The policy of a server folder.
+pub fn remote_policy(server: &Server, dir_url: &str) -> crate::crypt::Policy {
+    remote_entry(server, dir_url).0
+}
+
+/// Is the server folder a known folder (does it have a `.todo.txt` folder with a config)?
+pub fn remote_has_config(server: &Server, dir_url: &str) -> bool {
+    remote_entry(server, dir_url).1
+}
+
+/// Where notes / images of a list on the server live: `<folder>/.todo.txt/<sub>/` when the folder has a `.todo.txt`, else `<folder>/<sub>/`.
+pub fn remote_data_dir(server: &Server, list_dir_url: &str, sub: &str) -> String {
+    if remote_has_config(server, list_dir_url) {
+        format!("{}{sub}/", todo_dir_url(list_dir_url))
+    } else {
+        format!("{}{sub}/", if list_dir_url.ends_with('/') { list_dir_url.to_string() } else { format!("{list_dir_url}/") })
+    }
+}
+
+/// Write the settings of a server folder (creates `.todo.txt` on the server).
 pub fn write_remote_policy(server: &Server, dir_url: &str, p: &crate::crypt::Policy) -> Result<(), Error> {
-    put_plain(server, &join(dir_url, crate::crypt::DIR_CFG), &p.render())?;
+    put_plain(server, &join(&todo_dir_url(dir_url), crate::crypt::DIR_CFG), &p.render())?;
     let mut c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
-    c.retain(|(u, _, _)| u != dir_url);
-    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone()));
+    c.retain(|(u, _, _, _)| u != dir_url);
+    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone(), true));
     Ok(())
 }
 
@@ -549,13 +579,16 @@ pub fn put_plain(server: &Server, url: &str, text: &str) -> Result<(), Error> {
 }
 
 /// What the folder policy says about the remote file `url`: lists use the exceptions of their folder, notes (`notes/`) and
-/// images (`images/`) the default of the folder above. None = no opinion.
+/// images (`images/`, also below `.todo.txt/`) the default of the list folder. None = no opinion.
 pub fn remote_want(server: &Server, url: &str) -> Option<bool> {
     let dir = parent(url);
     let name = file_name(url);
     let last = dir.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_lowercase();
     if matches!(last.as_str(), "notes" | "images") {
-        if let Some(d) = remote_policy(server, &parent(&dir)).default {
+        let up = parent(&dir);
+        let up_last = up.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        let base = if up_last == crate::crypt::DIR_NAME { parent(&up) } else { up };
+        if let Some(d) = remote_policy(server, &base).default {
             return Some(d);
         }
     }

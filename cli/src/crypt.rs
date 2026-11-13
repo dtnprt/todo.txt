@@ -422,14 +422,53 @@ pub fn seal_for_path(path: &Path, text: &str) -> Result<String, Error> {
     }
 }
 
-// ---------- per-folder policy: `.todotxt.cfg` ----------
-// A hidden file in every folder that holds known lists (also on a WebDAV server) says what is encrypted there:
+// ---------- per-folder policy: `.todo.txt/config` ----------
+// A hidden `.todo.txt` folder in every known folder (also on a WebDAV server) holds a `config` that says what is encrypted there:
 //   encrypt=true|false     default for the lists, notes and images of this folder
 //   plain=a.txt,b.txt      lists that are NOT encrypted although the default is true (readable by other todo.txt apps)
 //   encrypted=c.txt        lists that ARE encrypted although the default is false
 // Without the file (or without a `encrypt=` line) the global `encrypt=` of `todo.cfg` decides, and an encrypted file stays encrypted.
 
-pub const DIR_CFG: &str = ".todotxt.cfg";
+/// The hidden folder of a todo folder (like `.git`): its presence makes the folder a *known folder*. It holds `config` (what is
+/// encrypted here), `notes/` and `images/`. On a WebDAV server the same layout is used.
+pub const DIR_NAME: &str = ".todo.txt";
+/// The settings file inside `.todo.txt`.
+pub const DIR_CFG: &str = "config";
+const LEGACY_CFG: &str = ".todotxt.cfg";
+
+pub fn todo_dir(dir: &Path) -> PathBuf {
+    dir.join(DIR_NAME)
+}
+
+/// Is `dir` a known folder (does it have a `.todo.txt` folder)?
+pub fn has_todo_dir(dir: &Path) -> bool {
+    todo_dir(dir).is_dir()
+}
+
+/// Create `dir/.todo.txt` (with an empty settings file) if it is not there yet.
+pub fn ensure_todo_dir(dir: &Path) -> std::io::Result<()> {
+    let t = todo_dir(dir);
+    std::fs::create_dir_all(&t)?;
+    let cfg = t.join(DIR_CFG);
+    if !cfg.exists() {
+        std::fs::write(cfg, Policy::default().render())?;
+    }
+    Ok(())
+}
+
+/// Where notes (`sub` = "notes") or pasted images (`sub` = "images") of a list live: in `.todo.txt/<sub>` of the list's folder when
+/// that exists, else (folder mode, old layout) `<folder>/<sub>`, else `~/.todo.txt/<sub>`.
+pub fn data_dir(list_dir: Option<&Path>, folder_mode: bool, sub: &str) -> PathBuf {
+    if let Some(d) = list_dir {
+        if has_todo_dir(d) {
+            return todo_dir(d).join(sub);
+        }
+        if folder_mode {
+            return d.join(sub);
+        }
+    }
+    home().join(DIR_NAME).join(sub)
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
@@ -516,14 +555,18 @@ impl Policy {
 
 /// The policy file of a local folder (empty policy when there is none).
 pub fn policy_of_dir(dir: &Path) -> Policy {
-    std::fs::read_to_string(dir.join(DIR_CFG)).map(|t| Policy::parse(&t)).unwrap_or_default()
+    std::fs::read_to_string(todo_dir(dir).join(DIR_CFG))
+        .or_else(|_| std::fs::read_to_string(dir.join(LEGACY_CFG)))
+        .map(|t| Policy::parse(&t))
+        .unwrap_or_default()
 }
 
 pub fn write_policy(dir: &Path, p: &Policy) -> std::io::Result<()> {
-    std::fs::write(dir.join(DIR_CFG), p.render())
+    std::fs::create_dir_all(todo_dir(dir))?;
+    std::fs::write(todo_dir(dir).join(DIR_CFG), p.render())
 }
 
-/// Does the folder (a local path) have a policy file with a default?
+/// Does the folder (a local path) have settings with a default?
 pub fn has_policy(dir: &Path) -> bool {
     policy_of_dir(dir).default.is_some()
 }
@@ -535,10 +578,14 @@ pub fn policy_for_path(path: &Path) -> Option<bool> {
     let name = path.file_name()?.to_string_lossy().into_owned();
     let dirname = dir.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     if matches!(dirname.as_str(), "notes" | "images") {
-        if let Some(up) = dir.parent() {
-            if let Some(d) = policy_of_dir(up).default {
-                return Some(d);
-            }
+        let up = dir.parent();
+        // `<folder>/.todo.txt/notes` -> the folder above `.todo.txt`; `<folder>/notes` (old layout) -> the folder above
+        let base = match up {
+            Some(u) if u.file_name().is_some_and(|n| n == DIR_NAME) => u.parent(),
+            other => other,
+        };
+        if let Some(d) = base.and_then(|b| policy_of_dir(b).default) {
+            return Some(d);
         }
     }
     policy_of_dir(dir).decide(&name)
@@ -672,7 +719,12 @@ pub fn convert_images(dir: &Path, old: Option<&str>, new: Option<&str>) -> Resul
 
 /// Convert everything a todo folder holds: the lists, `notes/` and `images/`.
 pub fn convert_dir(dir: &Path, old: Option<&str>, new: Option<&str>) -> Result<usize, Error> {
-    Ok(convert_flat(dir, old, new)? + convert_flat(&dir.join("notes"), old, new)? + convert_images(&dir.join("images"), old, new)?)
+    let t = todo_dir(dir);
+    Ok(convert_flat(dir, old, new)?
+        + convert_flat(&t.join("notes"), old, new)?
+        + convert_images(&t.join("images"), old, new)?
+        + convert_flat(&dir.join("notes"), old, new)?
+        + convert_images(&dir.join("images"), old, new)?)
 }
 
 #[cfg(test)]
@@ -754,6 +806,9 @@ mod tests {
         std::fs::create_dir_all(dir.join("notes")).unwrap();
         set_session(Some("pw".into()));
         write_policy(&dir, &Policy::parse("encrypt=true\nplain=open.txt\n")).unwrap();
+        assert!(has_todo_dir(&dir) && dir.join(".todo.txt").join("config").exists());
+        std::fs::create_dir_all(dir.join(".todo.txt").join("notes")).unwrap();
+        assert!(is_encrypted(&seal_for_path(&dir.join(".todo.txt").join("notes").join("n.txt"), "x\n").unwrap())); // new layout
         assert!(is_encrypted(&seal_for_path(&dir.join("secret.txt"), "x\n").unwrap()));
         assert_eq!(seal_for_path(&dir.join("open.txt"), "x\n").unwrap(), "x\n");
         assert!(is_encrypted(&seal_for_path(&dir.join("notes").join("n.txt"), "x\n").unwrap())); // notes follow the default
@@ -761,6 +816,18 @@ mod tests {
         assert!(is_encrypted(&seal_for_path(&dir.join("secret.txt"), "x\n").unwrap()));
         assert_eq!(seal_for_path(&dir.join("other.txt"), "x\n").unwrap(), "x\n");
         set_session(None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn data_dirs() {
+        let dir = std::env::temp_dir().join(format!("todo-datadir-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(data_dir(Some(&dir), true, "notes"), dir.join("notes")); // old layout in folder mode
+        ensure_todo_dir(&dir).unwrap();
+        assert_eq!(data_dir(Some(&dir), true, "notes"), dir.join(".todo.txt").join("notes"));
+        assert_eq!(data_dir(Some(&dir), false, "images"), dir.join(".todo.txt").join("images"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
