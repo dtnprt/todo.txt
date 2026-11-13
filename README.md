@@ -87,9 +87,10 @@ todo --encrypt on        # asks for a password, encrypts the open file/folder (l
 todo --crypt-login       # keep the password in the OS keyring
 todo --crypt-hello on    # Windows only: ask Windows Hello before the keyring password is used
 todo --encrypt off       # decrypt everything again
+todo --backup            # local .zip backup (lists, notes, images); archiving done tasks makes one first
 ```
 
-Format: AES-256-GCM, key from PBKDF2-HMAC-SHA256 (600000 iterations); see `cli/src/crypt.rs`. Without the password the files cannot be recovered. Images and `todo.cfg` are not encrypted.
+Format: AES-256-GCM, key from PBKDF2-HMAC-SHA256 (600000 iterations); see `cli/src/crypt.rs`. Without the password the files cannot be recovered. Lists, notes and pasted images are encrypted (backups keep them encrypted); `todo.cfg` is not.
 
 ### Git
 

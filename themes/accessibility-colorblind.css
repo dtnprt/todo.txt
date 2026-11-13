@@ -23,8 +23,8 @@
   --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-size: 16px;
 }
-body.theme-colorblind .meta.overdue { text-decoration: underline wavy; font-weight: 700; }
-body.theme-colorblind .meta.today { text-decoration: underline; font-weight: 700; }
-body.theme-colorblind .task.due-overdue { box-shadow: inset 6px 0 0 var(--due-over); }
-body.theme-colorblind .task.due-today { box-shadow: inset 5px 0 0 var(--due-today); }
-body.theme-colorblind .task.due-soon { box-shadow: inset 3px 0 0 var(--due-soon); }
+body.theme-accessibility-colorblind .meta.overdue { text-decoration: underline wavy; font-weight: 700; }
+body.theme-accessibility-colorblind .meta.today { text-decoration: underline; font-weight: 700; }
+body.theme-accessibility-colorblind .task.due-overdue { box-shadow: inset 6px 0 0 var(--due-over); }
+body.theme-accessibility-colorblind .task.due-today { box-shadow: inset 5px 0 0 var(--due-today); }
+body.theme-accessibility-colorblind .task.due-soon { box-shadow: inset 3px 0 0 var(--due-soon); }

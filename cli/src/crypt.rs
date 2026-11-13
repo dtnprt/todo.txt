@@ -105,6 +105,11 @@ fn key_for(password: &str, salt: &[u8], iterations: u32) -> [u8; 32] {
 
 /// Encrypt `plain` with `password` (fresh nonce each time; the salt, and with it the key, is reused for the process).
 pub fn seal(plain: &str, password: &str) -> Result<String, Error> {
+    seal_bytes(plain.as_bytes(), password)
+}
+
+/// Encrypt arbitrary bytes (pasted images); the result is the same text format.
+pub fn seal_bytes(plain: &[u8], password: &str) -> Result<String, Error> {
     let salt = {
         let mut s = SEAL_SALT.lock().unwrap_or_else(|e| e.into_inner());
         match *s {
@@ -119,13 +124,13 @@ pub fn seal(plain: &str, password: &str) -> Result<String, Error> {
     seal_with_salt(plain, password, &salt, ITERATIONS)
 }
 
-fn seal_with_salt(plain: &str, password: &str, salt: &[u8; 16], iterations: u32) -> Result<String, Error> {
+fn seal_with_salt(plain: &[u8], password: &str, salt: &[u8; 16], iterations: u32) -> Result<String, Error> {
     let nonce = random::<12>()?;
     let key = key_for(password, salt, iterations);
     let header = format!("{MAGIC} {KDF} {iterations} {} {}", B64.encode(salt), B64.encode(nonce));
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| Error::Other(e.to_string()))?;
     let ct = cipher
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: plain.as_bytes(), aad: header.as_bytes() })
+        .encrypt(Nonce::from_slice(&nonce), Payload { msg: plain, aad: header.as_bytes() })
         .map_err(|_| Error::Other("encryption failed".into()))?;
     let body = B64.encode(ct);
     let mut out = String::with_capacity(header.len() + body.len() + body.len() / 76 + 4);
@@ -140,6 +145,11 @@ fn seal_with_salt(plain: &str, password: &str, salt: &[u8; 16], iterations: u32)
 
 /// Decrypt a file text with `password`.
 pub fn open_with(text: &str, password: &str) -> Result<String, Error> {
+    String::from_utf8(open_bytes_with(text, password)?).map_err(|_| Error::Malformed("not UTF-8 text".into()))
+}
+
+/// Decrypt to raw bytes.
+pub fn open_bytes_with(text: &str, password: &str) -> Result<Vec<u8>, Error> {
     let (header, body) = text.split_once('\n').unwrap_or((text, ""));
     let header = header.trim_end_matches('\r');
     let parts: Vec<&str> = header.split_whitespace().collect();
@@ -162,10 +172,9 @@ pub fn open_with(text: &str, password: &str) -> Result<String, Error> {
     let ct = B64.decode(compact).map_err(|_| Error::Malformed("bad body".into()))?;
     let key = key_for(password, &salt, iterations);
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| Error::Other(e.to_string()))?;
-    let plain = cipher
+    cipher
         .decrypt(Nonce::from_slice(&nonce), Payload { msg: &ct, aad: header.as_bytes() })
-        .map_err(|_| Error::WrongPassword)?;
-    String::from_utf8(plain).map_err(|_| Error::Malformed("not UTF-8 text".into()))
+        .map_err(|_| Error::WrongPassword)
 }
 
 // ---------- session password, keyring, settings ----------
@@ -187,7 +196,7 @@ pub fn has_session() -> bool {
     session_password().is_some()
 }
 
-fn home() -> PathBuf {
+pub fn home() -> PathBuf {
     #[cfg(windows)]
     let order = ["USERPROFILE", "HOME"];
     #[cfg(not(windows))]
@@ -421,22 +430,27 @@ pub fn seal_for_path(path: &Path, text: &str) -> Result<String, Error> {
 
 // ---------- converting files ----------
 
-/// Rewrite one file: decrypt with `old` if it is encrypted, then encrypt with `new` (None = leave it plain).
-/// Returns whether the file changed.
+fn is_encrypted_bytes(b: &[u8]) -> bool {
+    b.len() > MAGIC.len() && b.starts_with(MAGIC.as_bytes()) && b[MAGIC.len()] == b' '
+}
+
+/// Rewrite one file (a list, a note or an image): decrypt with `old` if it is encrypted, then encrypt with `new`
+/// (None = leave it plain). Returns whether the file changed.
 pub fn convert_file(path: &Path, old: Option<&str>, new: Option<&str>) -> Result<bool, Error> {
-    let text = std::fs::read_to_string(path).map_err(|e| Error::Other(format!("{}: {e}", path.display())))?;
-    let encrypted = is_encrypted(&text);
-    let plain = if encrypted {
-        open_with(&text, old.ok_or(Error::NeedPassword)?)?
+    let raw = std::fs::read(path).map_err(|e| Error::Other(format!("{}: {e}", path.display())))?;
+    let encrypted = is_encrypted_bytes(&raw);
+    let plain: Vec<u8> = if encrypted {
+        let text = String::from_utf8(raw.clone()).map_err(|_| Error::Malformed("not text".into()))?;
+        open_bytes_with(&text, old.ok_or(Error::NeedPassword)?)?
     } else {
-        text.clone()
+        raw
     };
-    let out = match new {
+    let out: Vec<u8> = match new {
         Some(p) => {
             if encrypted && old == Some(p) {
                 return Ok(false);
             }
-            seal(&plain, p)?
+            seal_bytes(&plain, p)?.into_bytes()
         }
         None => {
             if !encrypted {
@@ -447,6 +461,34 @@ pub fn convert_file(path: &Path, old: Option<&str>, new: Option<&str>) -> Result
     };
     std::fs::write(path, out).map_err(|e| Error::Other(format!("{}: {e}", path.display())))?;
     Ok(true)
+}
+
+/// Read a file that may be encrypted (images): the plain bytes.
+pub fn read_file_auto(path: &Path) -> Result<Vec<u8>, Error> {
+    let raw = std::fs::read(path).map_err(|e| Error::Other(format!("{}: {e}", path.display())))?;
+    if !is_encrypted_bytes(&raw) {
+        return Ok(raw);
+    }
+    let text = String::from_utf8(raw).map_err(|_| Error::Malformed("not text".into()))?;
+    let pw = resolve_password()?;
+    match open_bytes_with(&text, &pw) {
+        Err(Error::WrongPassword) => {
+            set_session(None);
+            Err(Error::WrongPassword)
+        }
+        r => r,
+    }
+}
+
+/// Bytes to write to `path` (images): encrypted when encryption is on or the file is already encrypted.
+pub fn seal_bytes_for_path(path: &Path, data: &[u8]) -> Result<Vec<u8>, Error> {
+    let keep = !enabled() && std::fs::read(path).ok().is_some_and(|b| is_encrypted_bytes(&b[..b.len().min(16)]));
+    if enabled() || keep {
+        let pw = resolve_password()?;
+        Ok(seal_bytes(data, &pw)?.into_bytes())
+    } else {
+        Ok(data.to_vec())
+    }
 }
 
 /// Convert the visible `*.txt` files directly in `dir` (see `convert_file`). Returns the number of changed files.
@@ -463,9 +505,23 @@ pub fn convert_flat(dir: &Path, old: Option<&str>, new: Option<&str>) -> Result<
     Ok(n)
 }
 
-/// Convert every visible `*.txt` in `dir` and in `dir/notes`.
+/// Convert the pasted images (`png jpg jpeg gif webp bmp`) directly in `dir`.
+pub fn convert_images(dir: &Path, old: Option<&str>, new: Option<&str>) -> Result<usize, Error> {
+    let mut n = 0;
+    let Ok(rd) = std::fs::read_dir(dir) else { return Ok(0) };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        let ext_ok = name.rsplit_once('.').is_some_and(|(_, x)| matches!(x, "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"));
+        if e.metadata().map(|m| m.is_file()).unwrap_or(false) && !name.starts_with('.') && ext_ok && convert_file(&e.path(), old, new)? {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Convert everything a todo folder holds: the lists, `notes/` and `images/`.
 pub fn convert_dir(dir: &Path, old: Option<&str>, new: Option<&str>) -> Result<usize, Error> {
-    Ok(convert_flat(dir, old, new)? + convert_flat(&dir.join("notes"), old, new)?)
+    Ok(convert_flat(dir, old, new)? + convert_flat(&dir.join("notes"), old, new)? + convert_images(&dir.join("images"), old, new)?)
 }
 
 #[cfg(test)]
@@ -516,7 +572,7 @@ mod tests {
     #[test]
     fn known_vector_for_the_javascript_implementation() {
         // fixed salt/nonce so web/crypt.js can be checked against the very same text
-        let s = seal_with_salt("hello todo.txt\n", "pw", &[7u8; 16], 1000).unwrap();
+        let s = seal_with_salt(b"hello todo.txt\n", "pw", &[7u8; 16], 1000).unwrap();
         assert_eq!(open_with(&s, "pw").unwrap(), "hello todo.txt\n");
         assert!(s.starts_with(&format!("{MAGIC} {KDF} 1000 {} ", B64.encode([7u8; 16]))));
     }
@@ -528,14 +584,22 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "(A) one\n").unwrap();
         std::fs::write(dir.join("notes").join("n.txt"), "long text\n").unwrap();
         std::fs::write(dir.join(".hidden.txt"), "x\n").unwrap();
-        assert_eq!(convert_dir(&dir, None, Some("pw")).unwrap(), 2);
+        std::fs::create_dir_all(dir.join("images")).unwrap();
+        let png = [0x89u8, b'P', b'N', b'G', 0, 1, 2, 255, 254];
+        std::fs::write(dir.join("images").join("img-1.png"), png).unwrap();
+        assert_eq!(convert_dir(&dir, None, Some("pw")).unwrap(), 3);
+        assert!(is_encrypted_bytes(&std::fs::read(dir.join("images").join("img-1.png")).unwrap()));
+        set_session(Some("pw".into()));
+        assert_eq!(read_file_auto(&dir.join("images").join("img-1.png")).unwrap(), png);
+        set_session(None);
         assert!(is_encrypted(&std::fs::read_to_string(dir.join("a.txt")).unwrap()));
         assert_eq!(std::fs::read_to_string(dir.join(".hidden.txt")).unwrap(), "x\n");
         assert_eq!(convert_dir(&dir, Some("pw"), Some("pw")).unwrap(), 0);
-        assert_eq!(convert_dir(&dir, Some("pw"), Some("new")).unwrap(), 2);
+        assert_eq!(convert_dir(&dir, Some("pw"), Some("new")).unwrap(), 3);
         assert_eq!(convert_dir(&dir, Some("wrong"), None).unwrap_err(), Error::WrongPassword);
-        assert_eq!(convert_dir(&dir, Some("new"), None).unwrap(), 2);
+        assert_eq!(convert_dir(&dir, Some("new"), None).unwrap(), 3);
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "(A) one\n");
+        assert_eq!(std::fs::read(dir.join("images").join("img-1.png")).unwrap(), png);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

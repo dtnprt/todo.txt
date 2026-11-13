@@ -1,0 +1,66 @@
+/* Cupertino X - a glossy water-and-glass desktop of the early 2000s: blue wallpaper, pinstriped windows, gel buttons,
+   blue selection, traffic-light window buttons. Pure CSS, system fonts only (Lucida Grande if installed). */
+:root { --win-radius: 8px; --list-radius: 6px;
+  --bg: #2f62b5;
+  --panel: #ececec;
+  --hover: #dbe8fb;
+  --line: #9a9a9a;
+  --text: #000000;
+  --muted: #555555;
+  --accent: #3b73d3;
+  --accent-text: #ffffff;
+  --danger: #d8312b;
+  --warn: #cc7000;
+  --ok: #2a8a2a;
+  --pA: #d8312b;
+  --pB: #d97500;
+  --pC: #8a7a00;
+  --pD: #2f62b5;
+  --pX: #666666;
+  --due-soon: #8a7a00;
+  --due-today: #d97500;
+  --due-over: #d8312b;
+  color-scheme: light;
+  --font: 'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', Tahoma, 'Segoe UI', sans-serif;
+  --font-size: 14px;
+  --bg-image: radial-gradient(ellipse at 18% 8%, rgba(150, 195, 255, .75) 0, rgba(150, 195, 255, 0) 55%), radial-gradient(ellipse at 85% 85%, rgba(20, 60, 140, .6) 0, rgba(20, 60, 140, 0) 60%), linear-gradient(160deg, #3b72c9 0%, #2f62b5 45%, #204a96 100%);
+}
+
+body.theme-cupertino-x { -webkit-font-smoothing: antialiased; }
+/* title bar and status bar */
+body.theme-cupertino-x .topbar { background: linear-gradient(#f1f1f1, #c9c9c9); border: 0; border-bottom: 1px solid #7a7a7a; box-shadow: inset 0 1px #fff; }
+body.theme-cupertino-x .status { background: linear-gradient(#e3e3e3, #cdcdcd); border: 0; border-top: 1px solid #7a7a7a; color: #333; }
+/* gel buttons */
+body.theme-cupertino-x button { background: linear-gradient(#fdfdfd 0%, #e6e6e6 48%, #d3d3d3 52%, #ececec 100%); border: 1px solid #7d7d7d; border-radius: 11px; color: #000; text-shadow: 0 1px 0 rgba(255, 255, 255, .8); padding: 3px 14px; box-shadow: 0 1px 1px rgba(0, 0, 0, .25), inset 0 1px #fff; }
+body.theme-cupertino-x button:hover:not(:disabled) { background: linear-gradient(#ffffff 0%, #eef3fb 48%, #d9e4f6 52%, #f3f7fd 100%); }
+body.theme-cupertino-x button:active:not(:disabled) { background: linear-gradient(#b9b9b9, #d4d4d4); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .4); }
+body.theme-cupertino-x button.primary, body.theme-cupertino-x .topbar button.icon.active { background: linear-gradient(#a8c8f6 0%, #6a9be6 48%, #3d74d2 52%, #7fb0f5 100%); border-color: #2c58a3; color: #fff; text-shadow: 0 -1px 0 rgba(0, 0, 40, .45); }
+/* windows */
+body.theme-cupertino-x .tasks, body.theme-cupertino-x .composer-box { background: #ffffff; border: 1px solid #7d7d7d; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); color: #000; }
+body.theme-cupertino-x .sidebar { background: repeating-linear-gradient(to bottom, #ececec 0 2px, #f7f7f7 2px 4px); border: 1px solid #7d7d7d; border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); padding: 8px 10px; }
+body.theme-cupertino-x input[type=text], body.theme-cupertino-x select, body.theme-cupertino-x textarea { background: #fff; border: 1px solid #8a8a8a; border-radius: 3px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .25); }
+body.theme-cupertino-x input[type=text]:focus, body.theme-cupertino-x .composer-box:focus-within { box-shadow: 0 0 0 3px rgba(90, 150, 255, .6); border-color: #5a8fe0; }
+body.theme-cupertino-x .task { border-bottom: 1px solid #e4e4e4; }
+body.theme-cupertino-x .task:hover { background: #e8f0fd; }
+body.theme-cupertino-x .side-item { border: 0; background: none; box-shadow: none; text-shadow: none; border-radius: 4px; }
+body.theme-cupertino-x .side-item:hover { background: #dbe8fb; }
+body.theme-cupertino-x .side-item.active { background: linear-gradient(#6fa2ea, #3a72d6); color: #fff; }
+body.theme-cupertino-x .meta { background: #e8edf5; border: 1px solid #c5cddb; color: #333; }
+/* menus and dialogs */
+body.theme-cupertino-x .dd-menu, body.theme-cupertino-x .ac, body.theme-cupertino-x .help-box { background: rgba(250, 250, 250, .96); border: 1px solid #8f8f8f; border-radius: 6px; box-shadow: 0 8px 22px rgba(0, 0, 0, .45); }
+body.theme-cupertino-x .dd-menu button, body.theme-cupertino-x .ac button, body.theme-cupertino-x .set-pane button, body.theme-cupertino-x #themeMenu button { background: none; border: 0; box-shadow: none; text-shadow: none; border-radius: 3px; }
+body.theme-cupertino-x .dd-menu button:hover, body.theme-cupertino-x .ac button:hover, body.theme-cupertino-x .set-pane button:hover, body.theme-cupertino-x #themeMenu button:hover { background: linear-gradient(#6fa2ea, #3a72d6); color: #fff; }
+body.theme-cupertino-x .set-head, body.theme-cupertino-x .help-box > h2 { background: linear-gradient(#ececec, #cfcfcf); border-bottom: 1px solid #9a9a9a; border-radius: 5px 5px 0 0; padding: 4px 10px; }
+body.theme-cupertino-x .set-tabs button[aria-selected="true"] { background: linear-gradient(#6fa2ea, #3a72d6); color: #fff; }
+/* traffic lights */
+body.theme-cupertino-x .win-ctl { gap: 8px; margin: 0 8px; }
+body.theme-cupertino-x #winMin, body.theme-cupertino-x #winClose { width: 14px; height: 14px; min-width: 0; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .35); color: transparent; box-shadow: inset 0 1px 1px rgba(255, 255, 255, .7); text-shadow: none; }
+body.theme-cupertino-x #winMin { background: radial-gradient(circle at 50% 30%, #ffe27a, #e8a900); }
+body.theme-cupertino-x #winClose { background: radial-gradient(circle at 50% 30%, #ff9a8f, #e0352b); }
+body.theme-cupertino-x #winMin:hover:not(:disabled), body.theme-cupertino-x #winClose:hover:not(:disabled) { color: rgba(0, 0, 0, .65); }
+body.theme-cupertino-x #winClose:hover:not(:disabled) { background: radial-gradient(circle at 50% 30%, #ff9a8f, #e0352b); }
+body.theme-cupertino-x .win-ctl i { font-size: 9px; }
+body.theme-cupertino-x .scroll-area:hover::-webkit-scrollbar-thumb, body.theme-cupertino-x .scroll-area.sb-active::-webkit-scrollbar-thumb { background-color: #6a9be0; }
+body.theme-cupertino-x button.chip { background: none; border: 0; box-shadow: none; padding: 0; text-shadow: none; }
+body.theme-cupertino-x button.chip:hover:not(:disabled) { background: none; text-decoration: underline; }
+body.theme-cupertino-x .chip.project { color: #2b5cc0; }

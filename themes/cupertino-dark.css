@@ -1,0 +1,33 @@
+/* Cupertino dark */
+:root {
+  --bg: #1c1c1e;
+  --panel: rgba(44, 44, 46, .78);
+  --hover: rgba(255, 255, 255, .08);
+  --line: rgba(235, 235, 245, .16);
+  --text: #f5f5f7;
+  --muted: #98989d;
+  --accent: #0a84ff;
+  --accent-text: #ffffff;
+  --danger: #ff453a;
+  --warn: #ff9f0a;
+  --ok: #30d158;
+  --pA: #ff453a;
+  --pB: #ff9f0a;
+  --pC: #ffd60a;
+  --pD: #30d158;
+  --pX: #8e8e93;
+  --due-soon: #ffd60a;
+  --due-today: #ff9f0a;
+  --due-over: #ff453a;
+  color-scheme: dark;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 15px;
+}
+
+body[class*="theme-cupertino"] { -webkit-font-smoothing: antialiased; }
+body[class*="theme-cupertino"] .topbar, body[class*="theme-cupertino"] .status { backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); }
+body[class*="theme-cupertino"] .tasks, body[class*="theme-cupertino"] .composer-box, body[class*="theme-cupertino"] .sidebar { backdrop-filter: blur(20px); border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 8px 24px rgba(0, 0, 0, .08); }
+body[class*="theme-cupertino"] button, body[class*="theme-cupertino"] input[type=text], body[class*="theme-cupertino"] select { border-radius: 8px; }
+body[class*="theme-cupertino"] .dd-menu, body[class*="theme-cupertino"] .ac { border-radius: 10px; backdrop-filter: blur(24px); box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
+body[class*="theme-cupertino"] .side-item { border-radius: 8px; }
+body[class*="theme-cupertino"] .pri-btn { border-radius: 8px; }

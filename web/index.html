@@ -28,6 +28,7 @@
         <button id="save" role="menuitem"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save <kbd>Ctrl+S</kbd></button>
         <button id="saveAs" role="menuitem"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Save as…</button>
         <button id="keepFile" role="menuitem" title="Add this file to the known files and make it the default (files opened from another folder are otherwise not remembered)"><i class="fa-solid fa-bookmark" aria-hidden="true"></i> Remember this file</button>
+        <button id="backupZip" role="menuitem" style="display:none" title="Save a .zip of the lists, notes and images (encrypted files stay encrypted)"><i class="fa-solid fa-file-zipper" aria-hidden="true"></i> Backup as .zip…</button>
         <button id="archive" role="menuitem"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Archive done tasks <kbd>F5</kbd></button>
       </div>
     </div>
@@ -105,6 +106,7 @@
         <h3 class="set-sub">General</h3>
         <button id="autoSaveToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Auto save</button>
         <button id="showDone" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show completed <kbd>F3</kbd></button>
+        <button id="backupArchiveToggle" role="menuitemcheckbox" aria-checked="true" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Back up (.zip) before archiving</button>
         <button id="gitInit" class="git-item" role="menuitem" style="display:none"><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Initialize git here…</button>
         <h3 class="set-sub">Input</h3>
         <button id="calToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show calendar while typing <kbd>F6</kbd></button>
@@ -125,7 +127,7 @@
         <button id="minimalToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Minimal mode <kbd>F11</kbd></button>
       </div>
       <div class="set-pane" data-pane="themes" hidden>
-        <div id="themeMenu" role="menu"></div>
+        <div id="themeMenu" class="scroll-area" role="menu"></div>
         <div class="theme-foot">
           <div id="themeVariantBox" class="variant-box"></div>
           <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>

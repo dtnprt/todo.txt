@@ -10,6 +10,9 @@ mod git;
 // WebDAV storage + keyring credentials: the same code as the terminal app
 #[path = "../../cli/src/webdav.rs"]
 mod webdav;
+// local .zip backup: the same code as the terminal app
+#[path = "../../cli/src/backup.rs"]
+mod backup;
 // optional AES-256-GCM encryption of lists, notes and the WebDAV cache: the same code as the terminal app
 #[path = "../../cli/src/crypt.rs"]
 mod crypt;
@@ -151,12 +154,13 @@ fn write_image(folder: Option<String>, name: String, data: Vec<u8>) -> Result<()
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
+    let data = crypt::seal_bytes_for_path(&p, &data).map_err(|e| e.to_string())?;
     fs::write(&p, data).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn read_image(folder: Option<String>, name: String) -> Result<Vec<u8>, String> {
-    fs::read(image_path(&folder, &name)?).map_err(|e| e.to_string())
+    crypt::read_file_auto(&image_path(&folder, &name)?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -250,6 +254,29 @@ fn app_version() -> String {
 /// git2 calls block, so they run on a worker thread.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct BackupResult {
+    path: String,
+    files: usize,
+}
+
+/// Local backup as a .zip: `dest` = the file to write, None = a new file in the backup folder (see cli/src/backup.rs).
+#[tauri::command]
+async fn backup_create(todo: String, folder: Option<String>, dest: Option<String>) -> Result<BackupResult, String> {
+    blocking(move || {
+        let folder = folder.filter(|f| !f.is_empty());
+        let (p, n) = backup::create(Path::new(&todo), folder.as_deref().map(Path::new), dest.as_deref().map(Path::new)).map_err(|e| e.to_string())?;
+        Ok(BackupResult { path: p.to_string_lossy().into_owned(), files: n })
+    })
+    .await?
+}
+
+/// Does archiving make a backup first?
+#[tauri::command]
+fn backup_on_archive() -> bool {
+    backup::archive_backup_enabled()
 }
 
 // ---------- encryption (AES-256-GCM, see cli/src/crypt.rs) ----------
@@ -370,6 +397,7 @@ async fn crypt_convert(folder: Option<String>, files: Vec<String>, encrypt: bool
                     }
                 }
                 n += crypt::convert_flat(&home_dir().join(".todo.txt").join("notes"), old.as_deref(), new).map_err(e)?;
+                n += crypt::convert_images(&home_dir().join(".todo.txt").join("images"), old.as_deref(), new).map_err(e)?;
             }
         }
         if let Some(p) = new {
@@ -760,6 +788,8 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
+                backup_create,
+                backup_on_archive,
                 read_text,
                 write_text,
                 crypt_status,
@@ -805,6 +835,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
+                backup_create,
+                backup_on_archive,
                 read_text,
                 write_text,
                 crypt_status,

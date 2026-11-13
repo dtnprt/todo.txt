@@ -25,7 +25,7 @@
 }
 
 /* Background images (from the original theme) */
-body.theme-hacker {
+body.theme-terminal-hacker {
   background-color: var(--bg);
   background-image:
     linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),

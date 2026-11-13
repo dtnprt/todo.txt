@@ -44,8 +44,9 @@ const THEME_FAMILIES = {
   tokyonight: [['Night', 'tokyonight'], ['Storm', 'tokyonight-storm'], ['Day', 'tokyonight-day']],
   tomorrow: [['Night', 'tomorrow-night'], ['Day', 'tomorrow']],
   gruvbox: [['Dark', 'gruvbox-dark'], ['Light', 'gruvbox-light']],
-  macos: [['Light', 'macos-light'], ['Dark', 'macos-dark']],
-  terminal: [['Green', 'terminal-green'], ['Amber', 'terminal-amber'], ['White', 'terminal-white']],
+  cupertino: [['Light', 'cupertino-light'], ['Dark', 'cupertino-dark'], ['9', 'cupertino-9'], ['X', 'cupertino-x']],
+  terminal: [['Green', 'terminal-green'], ['Amber', 'terminal-amber'], ['White', 'terminal-white'], ['Hacker', 'terminal-hacker'], ['Pip-Boy', 'terminal-pipboy']],
+  accessibility: [['Colorblind', 'accessibility-colorblind'], ['High contrast', 'accessibility-high-contrast']],
 };
 /** family key of a theme value ('nord-light' -> 'nord', 'user:x-dark' -> 'user:x', else the value itself) */
 function themeKey(t) {
@@ -154,6 +155,11 @@ function restore() {
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
     if (typeof s.cornerName === 'boolean') state.cornerName = s.cornerName;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
+    {   // renamed / merged themes (also the `user:` form used by the desktop app)
+      const RENAMED = { ghibli: 'hauro', mario: 'plumber', windows95: 'redmond', 'macos-light': 'cupertino-light', 'macos-dark': 'cupertino-dark', hacker: 'terminal-hacker', pipboy: 'terminal-pipboy', colorblind: 'accessibility-colorblind', 'high-contrast': 'accessibility-high-contrast' };
+      const bare = String(s.theme || '').replace(/^user:/, '');
+      if (RENAMED[bare]) s.theme = 'user:' + RENAMED[bare];
+    }
     if (s.theme === 'nasa' || s.theme === 'user:nasa') s.theme = 'user:voyager-i';   // renamed
     if (s.theme === 'space' || s.theme === 'user:space') s.theme = 'user:space-game';   // renamed
     if (s.theme === 'lcars' || s.theme === 'user:lcars') s.theme = 'user:LCARS';   // renamed
@@ -402,6 +408,31 @@ async function webDecode(text, interactive = true) {
       C.setSession(null);
       if (!interactive) return null;
     }
+  }
+}
+
+/** Image bytes written in the browser (folder mode): encrypted when switched on. Takes a Blob, returns a Blob. */
+async function webEncodeBytes(blob) {
+  if (isTauri || !webEncrypt) return blob;
+  if (!C.hasSession()) {
+    const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password for the encrypted files. There is no way to recover it.', confirm: true });
+    if (!a) throw new Error('not saved: no password');
+    C.setSession(a.password);
+  }
+  return new Blob([await C.seal2bytes(new Uint8Array(await blob.arrayBuffer()), C.getSession())]);
+}
+/** Image file read in the browser: decrypted when it is an encrypted file. Takes a File/Blob, returns a Blob. */
+async function webDecodeBytes(file) {
+  const buf = await file.arrayBuffer();
+  if (isTauri || !C.isEncryptedBytes(buf)) return file;
+  const text = new TextDecoder().decode(buf);
+  for (let i = 0; ; i++) {
+    if (!C.hasSession()) {
+      const a = await askPassword({ title: 'Encrypted file', message: i ? 'That password does not fit. Try again.' : 'This image is encrypted. Enter the password.' });
+      if (!a) throw new Error('password required: cancelled');
+      C.setSession(a.password);
+    }
+    try { return new Blob([await C.openBytes(text, C.getSession())]); } catch (e) { if (!/wrong password/.test(e.message)) throw e; C.setSession(null); }
   }
 }
 
@@ -1318,10 +1349,32 @@ ${e.message || e}`); continue; }
   } catch (e) { console.warn('Could not open last file:', e); }
 }
 
+/** Desktop: write a .zip backup (dest = chosen file, or null for the backup folder). Resolves to the result or null. */
+async function makeBackup(dest) {
+  if (!isTauri || !state.path || isRemote(state.path)) { alert('A backup needs a local todo file (WebDAV lists are not backed up).'); return null; }
+  try {
+    return await invoke('backup_create', { todo: state.path, folder: state.folder && !isRemote(state.folder) ? state.folder : null, dest });
+  } catch (e) { alert(`Backup failed: ${e}`); return null; }
+}
+async function backupToZip() {
+  const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const dest = await tauri.dialog.save({ defaultPath: `todo-backup-${stamp}.zip`, filters: [{ name: 'Zip archive', extensions: ['zip'] }] });
+  if (!dest) return;
+  const r = await makeBackup(dest);
+  if (r) alert(`Backup written:\n${r.path}\n(${r.files} file(s))`);
+}
+
 async function archiveDone() {
   const done = state.lines.filter((l) => T.parse(l).done);
   if (!done.length) return;
-  if (!confirm(`Save ${done.length} completed task(s) as done.txt and remove them from the list?`)) return;
+  const backup = isTauri && state.path && !isRemote(state.path) && await invoke('backup_on_archive').catch(() => false);
+  if (!confirm(`Save ${done.length} completed task(s) as done.txt and remove them from the list?${backup ? '\n\nA backup (.zip) is made first.' : ''}`)) return;
+  if (backup) {
+    if (state.dirty) await save();   // the backup should contain what is on screen
+    const r = await makeBackup(null);
+    if (!r) return;   // no backup, no archiving
+  }
   try {
     if (!(await download('done.txt', T.serializeFile(done)))) return;
   } catch (e) {
@@ -1388,7 +1441,7 @@ async function writeImage(name, blob) {
   if (state.dirHandle) {
     const dir = await state.dirHandle.getDirectoryHandle('images', { create: true });
     const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
-    await w.write(blob);
+    await w.write(await webEncodeBytes(blob));
     return w.close();
   }
   const url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
@@ -1399,7 +1452,7 @@ async function writeImage(name, blob) {
 async function imageUrl(name) {
   try {
     if (isTauri) return URL.createObjectURL(new Blob([new Uint8Array(await invoke('read_image', { folder: imgFolder(), name }))]));
-    if (state.dirHandle) return URL.createObjectURL(await (await (await state.dirHandle.getDirectoryHandle('images')).getFileHandle(name)).getFile());
+    if (state.dirHandle) return URL.createObjectURL(await webDecodeBytes(await (await (await state.dirHandle.getDirectoryHandle('images')).getFileHandle(name)).getFile()));
     return localStorage.getItem(IMG_KEY + name);
   } catch { return null; }
 }
@@ -1905,6 +1958,8 @@ function render() {
     try { tauri.window.getCurrentWindow().setDecorations(!state.frameless).catch(() => {}); } catch { /* ignore */ }
   }
   $('#archive').disabled = !state.lines.some((l) => T.parse(l).done);
+  $('#backupZip').style.display = isTauri && state.path && !isRemote(state.path) ? '' : 'none';
+  $('#backupArchiveToggle').style.display = isTauri ? '' : 'none';
   const vt = $('#viewToggle');
   vt.replaceChildren(el('i', { className: 'fa-solid ' + (state.view === 'list' ? 'fa-file-lines' : 'fa-list') }),
     state.view === 'list' ? ' Text view' : ' List view');
@@ -2307,7 +2362,7 @@ function buildThemeMenu() {
   const menu = $('#themeMenu');
   const keepScroll = menu.scrollTop;
   menu.replaceChildren();
-  const NICE = { 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', 'space-invaders': 'Space Invaders', pipboy: 'Pip-Boy', macos: 'macOS', windows95: 'Windows 95', 'high-contrast': 'High contrast', amiga: 'Amiga Workbench', 'voyager-i': 'Voyager I' };
+  const NICE = { hauro: 'Hauro', plumber: 'Plumber', redmond: 'Redmond', cupertino: 'Cupertino', accessibility: 'Accessibility', 'grand-theft-six': 'Grand Theft Six', 'space-game': 'Space Game', 'space-invaders': 'Space Invaders', amiga: 'Amiga Workbench', 'voyager-i': 'Voyager I' };
   const label = (key) => NICE[key.replace(/^user:/, '')] || key.replace(/^user:/, '').replace(/^./, (c) => c.toUpperCase());
   const cur = themeKey(state.theme);
   const vars = cur ? themeVariants(cur) : [];
@@ -2381,6 +2436,7 @@ const settingsEl = $('#settings');
 function showTab(name) {
   if (name === 'webdav') dav.renderPane(settingsEl.querySelector('[data-pane=webdav]'));
   if (name === 'security') refreshSecurity();
+  if (name === 'general' && isTauri) refreshBackupToggle();
   settingsEl.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   settingsEl.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== name; });
 }
@@ -2555,6 +2611,15 @@ $('#keepFile').onclick = async () => {
   renderFileList();
 };
 $('#archive').onclick = archiveDone;
+$('#backupZip').onclick = backupToZip;
+$('#backupArchiveToggle').onclick = async () => {
+  const on = !(await invoke('backup_on_archive').catch(() => true));
+  await setCfgNow('backuparchive', on);
+  refreshBackupToggle();
+};
+async function refreshBackupToggle() {
+  $('#backupArchiveToggle').setAttribute('aria-checked', String(!!(await invoke('backup_on_archive').catch(() => true))));
+}
 $('#refresh').onclick = () => checkExternalChange(true);
 $('#fileInput').onchange = (e) => {
   const f = e.target.files[0];

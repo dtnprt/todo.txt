@@ -7,6 +7,7 @@
 //!   todo -p 3 A                        set priority of line 3 (todo -p 3 - removes it)
 //!   todo -e 3 | -c 3 TEXT | -d 3       edit / change / delete line 3
 
+mod backup;
 mod config;
 mod crypt;
 mod davcache;
@@ -172,6 +173,10 @@ struct Cli {
     #[arg(long, value_name = "on|off")]
     crypt_hello: Option<String>,
 
+    /// Local backup as a .zip of the open file / folder (lists, notes, images, done.txt; encrypted files stay encrypted). Without FILE: `~/.todo.txt/backups/todo-backup-DATE.zip`
+    #[arg(long, value_name = "FILE.zip", num_args = 0..=1, default_missing_value = "")]
+    backup: Option<String>,
+
     /// With -f: remember the file (default + known files) even if it is outside the folder of the remembered one
     #[arg(short = 'K', long)]
     keep: bool,
@@ -239,6 +244,7 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
                     }
                 }
                 n += crypt::convert_flat(&home.join(".todo.txt").join("notes"), old, new)?;
+                n += crypt::convert_images(&home.join(".todo.txt").join("images"), old, new)?;
             }
         }
         Ok(n)
@@ -423,6 +429,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         && cli.note.is_none()
         && cli.priority.is_none()
         && cli.parent.is_none()
+        && cli.backup.is_none()
         && !crypt_switches(&cli);
     let info_only = idle && cli.verbose && !git_switches;
     let tui_mode = idle && !cli.verbose;
@@ -557,6 +564,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     // commit (+ push) when this run changed the todo file or the note, if .todo-git.cfg allows it
     let _dav = if tui_mode { None } else { Some(DavNote(path.clone())) };
     let _auto = if tui_mode { None } else { Some(AutoCommit::new(folder.as_deref(), &path, cli.note.is_some())) };
+
+    // ---- backup ----
+    if let Some(dest) = &cli.backup {
+        let dest = if dest.is_empty() { None } else { Some(PathBuf::from(dest)) };
+        let (zip, n) = backup::create(&path, folder.as_deref(), dest.as_deref())?;
+        println!("backup: {} ({n} file(s))", zip.display());
+        return Ok(());
+    }
 
     // ---- encryption switches ----
     if crypt_switches(&cli) {
@@ -864,6 +879,7 @@ fn print_info(cfg: &Config, path: &std::path::Path, folder: Option<&std::path::P
         println!("lists:      {} *.txt file(s) in the folder", files.len());
     }
     println!("notes:      {}", folder::note_dir(folder).display());
+    println!("backups:    {} (before archiving: {})", backup::backup_dir().display(), onoff(Some(backup::archive_backup_enabled()), true));
     println!(
         "encryption: {} · password {} · Windows Hello {}",
         if crypt::enabled() { "on (AES-256-GCM)" } else { "off" },

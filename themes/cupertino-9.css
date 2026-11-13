@@ -1,0 +1,58 @@
+/* Cupertino 9 - a platinum desktop of the late nineties: periwinkle background, platinum chrome with black outlines and
+   bevels, striped title bars, lavender selection. Pure CSS, system fonts only (Charcoal/Chicago/Geneva if installed). */
+:root { --win-radius: 0; --list-radius: 0;
+  --bg: #6e6eaf;
+  --panel: #dddddd;
+  --hover: #ccccff;
+  --line: #000000;
+  --text: #000000;
+  --muted: #444444;
+  --accent: #9999cc;
+  --accent-text: #000000;
+  --danger: #cc0000;
+  --warn: #aa5500;
+  --ok: #006600;
+  --pA: #cc0000;
+  --pB: #bb5500;
+  --pC: #777700;
+  --pD: #000099;
+  --pX: #555555;
+  --due-soon: #777700;
+  --due-today: #bb5500;
+  --due-over: #cc0000;
+  color-scheme: light;
+  --font: 'Charcoal', 'Chicago', 'Geneva', 'Lucida Grande', Verdana, 'Segoe UI', sans-serif;
+  --font-size: 14px;
+  --bg-image: radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, .10), rgba(255, 255, 255, 0) 70%);
+}
+
+body.theme-cupertino-9 *, body.theme-cupertino-9 *::before { border-radius: 0; }
+/* menu bar */
+body.theme-cupertino-9 .topbar { background: #f2f2f2; border: 0; border-bottom: 1px solid #000; box-shadow: inset 0 1px #fff, inset 0 -1px #bbb; }
+body.theme-cupertino-9 .status { background: #dddddd; border: 0; border-top: 1px solid #000; box-shadow: inset 0 1px #fff; color: #000; }
+/* push buttons */
+body.theme-cupertino-9 button { background: linear-gradient(#ffffff, #dcdcdc 55%, #cfcfcf); border: 1px solid #000; border-radius: 5px; color: #000; padding: 4px 13px; box-shadow: inset 1px 1px #fff, inset -1px -1px #8c8c8c; }
+body.theme-cupertino-9 button:hover:not(:disabled) { background: linear-gradient(#ffffff, #e8e8f8 55%, #d6d6ee); }
+body.theme-cupertino-9 button:active:not(:disabled) { background: #aaaaaa; box-shadow: inset 1px 1px #666; }
+body.theme-cupertino-9 button.primary { box-shadow: 0 0 0 1px #fff, 0 0 0 2px #000, inset 1px 1px #fff, inset -1px -1px #8c8c8c; font-weight: 700; }
+/* windows */
+body.theme-cupertino-9 .tasks, body.theme-cupertino-9 .composer-box { background: #ffffff; border: 1px solid #000; box-shadow: inset 1px 1px #999, 2px 2px 0 rgba(0, 0, 0, .35); color: #000; }
+body.theme-cupertino-9 .sidebar { background: #dddddd; border: 1px solid #000; box-shadow: inset 1px 1px #fff, inset -1px -1px #999, 2px 2px 0 rgba(0, 0, 0, .35); padding: 8px 10px; }
+body.theme-cupertino-9 input[type=text], body.theme-cupertino-9 select, body.theme-cupertino-9 textarea { background: #fff; border: 1px solid #000; box-shadow: inset 1px 1px #888; border-radius: 0; }
+body.theme-cupertino-9 .task { border-bottom: 1px solid #d6d6d6; }
+body.theme-cupertino-9 .task:hover { background: #ccccff; }
+body.theme-cupertino-9 .side-item { border: 0; background: none; box-shadow: none; padding: 3px 8px; border-radius: 0; }
+body.theme-cupertino-9 .side-item:hover { background: #ccccff; }
+body.theme-cupertino-9 .side-item.active { background: #9999cc; color: #000; }
+body.theme-cupertino-9 .meta { background: #e6e6e6; border: 1px solid #aaa; color: #000; }
+/* menus and dialogs: platinum with a striped title bar */
+body.theme-cupertino-9 .dd-menu, body.theme-cupertino-9 .ac, body.theme-cupertino-9 .help-box { background: #dddddd; border: 1px solid #000; box-shadow: inset 1px 1px #fff, inset -1px -1px #999, 3px 3px 0 rgba(0, 0, 0, .4); backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.theme-cupertino-9 .dd-menu button, body.theme-cupertino-9 .ac button, body.theme-cupertino-9 .set-pane button, body.theme-cupertino-9 #themeMenu button { background: none; border: 0; box-shadow: none; border-radius: 0; }
+body.theme-cupertino-9 .dd-menu button:hover, body.theme-cupertino-9 .ac button:hover, body.theme-cupertino-9 .set-pane button:hover, body.theme-cupertino-9 #themeMenu button:hover { background: #9999cc; color: #000; }
+body.theme-cupertino-9 .set-head, body.theme-cupertino-9 .help-box > h2 { background: repeating-linear-gradient(to bottom, #ffffff 0 1px, #b8b8b8 1px 2px); border: 1px solid #000; padding: 2px 8px; text-align: center; }
+body.theme-cupertino-9 .set-head h2 { background: #ddd; padding: 0 10px; margin: 0 auto; }
+body.theme-cupertino-9 .set-tabs button[aria-selected="true"] { background: #fff; }
+body.theme-cupertino-9 .scroll-area:hover::-webkit-scrollbar-thumb, body.theme-cupertino-9 .scroll-area.sb-active::-webkit-scrollbar-thumb { background-color: #8888bb; }
+body.theme-cupertino-9 button.chip { background: none; border: 0; box-shadow: none; padding: 0; }
+body.theme-cupertino-9 button.chip:hover:not(:disabled) { background: none; text-decoration: underline; }
+body.theme-cupertino-9 .chip.project { color: #2a2aa8; }

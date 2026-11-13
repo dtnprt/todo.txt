@@ -828,6 +828,17 @@ impl App {
             self.msg = Some("No completed tasks to archive".into());
             return;
         }
+        // a backup first (settings: backuparchive), so archiving never is the only copy of the data
+        let mut backup_note = String::new();
+        if crate::backup::archive_backup_enabled() && !crate::webdav::is_remote(&self.path.to_string_lossy()) {
+            match crate::backup::create(&self.path, self.folder.as_deref(), None) {
+                Ok((p, _)) => backup_note = format!(" (backup: {})", p.display()),
+                Err(e) => {
+                    self.msg = Some(format!("Not archived: the backup failed: {e}"));
+                    return;
+                }
+            }
+        }
         let target = self.path.with_file_name("done.txt");
         let crlf = self.store.crlf();
         let res = OpenOptions::new().create(true).append(true).open(&target).and_then(|mut f| {
@@ -840,7 +851,7 @@ impl App {
             Ok(()) => {
                 let n = done.len();
                 self.commit(open);
-                self.msg = Some(format!("Archived {n} task(s) to {}", target.display()));
+                self.msg = Some(format!("Archived {n} task(s) to {}{backup_note}", target.display()));
             }
             Err(e) => self.msg = Some(format!("Could not write {}: {e}", target.display())),
         }
@@ -1247,6 +1258,13 @@ impl App {
             }
             KeyCode::F(5) => {
                 self.archive_done();
+                return;
+            }
+            KeyCode::Char('b') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.msg = Some(match crate::backup::create(&self.path, self.folder.as_deref(), None) {
+                    Ok((p, n)) => format!("Backup written: {} ({n} file(s))", p.display()),
+                    Err(e) => format!("Backup failed: {e}"),
+                });
                 return;
             }
             KeyCode::F(6) => {
@@ -2009,7 +2027,7 @@ impl App {
             "           Ctrl+Backspace / Ctrl+Delete  remove the whole word",
             "           Ctrl+Z / Ctrl+Y  undo / redo while typing",
             "Dates:     due:tomorrow  due:+3d  due:next week  due:24.12.  due:24.12.2026",
-            "Global:    F2 sort   F3 show/hide done   F4 sidebar   F5 archive done",
+            "Global:    F2 sort   F3 show/hide done   F4 sidebar   F5 archive done (with backup)   Ctrl+B backup .zip",
             "           F6 calendar on/off   F7 note of the task   F8 file / folder selector",
             "           Ctrl+K remember this file (add to known files, make it the default)",
             "           Ctrl+L status line on/off",

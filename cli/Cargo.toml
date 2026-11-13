@@ -1,6 +1,6 @@
 [package]
 name = "todo-cli"
-version = "0.1.51"
+version = "0.1.52"
 edition = "2021"
 description = "todo.txt command line tool with an interactive terminal UI"
 
@@ -18,6 +18,7 @@ git2 = "0.21"
 auth-git2 = "0.6"
 ureq = "2"
 rpassword = "7"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 aes-gcm = "0.10"
 pbkdf2 = "0.12"
 sha2 = "0.10"

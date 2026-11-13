@@ -42,18 +42,28 @@ async function keyFor(password, salt, iterations) {
 let sealSalt = null;
 
 /** Encrypt `plain` (the salt, and with it the key, is reused for the session; the nonce is fresh every time). */
-export async function seal(plain, password, { salt, nonce, iterations = ITERATIONS } = {}) {
+export async function seal(plain, password, opts = {}) {
+  return sealBytes(enc.encode(plain), password, opts);
+}
+
+/** Encrypt bytes (Uint8Array), e.g. a pasted image; same text format. */
+export async function sealBytes(data, password, { salt, nonce, iterations = ITERATIONS } = {}) {
   salt = salt || (sealSalt ||= crypto.getRandomValues(new Uint8Array(16)));
   nonce = nonce || crypto.getRandomValues(new Uint8Array(12));
   const header = `${MAGIC} pbkdf2-sha256 ${iterations} ${b64(salt)} ${b64(nonce)}`;
   const key = await keyFor(password, salt, iterations);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: enc.encode(header) }, key, enc.encode(plain));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, additionalData: enc.encode(header) }, key, data);
   const body = bytes64(ct).match(/.{1,76}/g) || [];
   return `${header}\n${body.join('\n')}\n`;
 }
 
 /** Decrypt a file text. Throws Error('wrong password …') or Error('damaged encrypted file: …'). */
 export async function open(text, password) {
+  return dec.decode(await openBytes(text, password));
+}
+
+/** Decrypt to bytes (Uint8Array). */
+export async function openBytes(text, password) {
   const nl = text.indexOf('\n');
   const header = (nl < 0 ? text : text.slice(0, nl)).replace(/\r$/, '');
   const body = nl < 0 ? '' : text.slice(nl + 1);
@@ -69,5 +79,16 @@ export async function open(text, password) {
   let plain;
   try { plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: enc.encode(header) }, key, ct); }
   catch { throw new Error('wrong password (or the encrypted file was modified)'); }
-  return dec.decode(plain);
+  return new Uint8Array(plain);
+}
+
+/** Is this file content (ArrayBuffer/Uint8Array) an encrypted-file text? */
+export function isEncryptedBytes(buf) {
+  const b = new Uint8Array(buf).subarray(0, MAGIC.length + 1);
+  return b.length === MAGIC.length + 1 && String.fromCharCode(...b) === MAGIC + ' ';
+}
+
+/** Encrypt bytes and return the encrypted file as bytes (UTF-8 text), ready to be written. */
+export async function seal2bytes(data, password, opts = {}) {
+  return enc.encode(await sealBytes(data, password, opts));
 }
