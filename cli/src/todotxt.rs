@@ -17,19 +17,50 @@ pub fn today() -> NaiveDate {
 /// Deepest sub-entry level (`----`).
 pub const MAX_LEVEL: usize = 4;
 
-/// Sub-entries: one to four dashes and a space in front of the line (`- sub`, `-- sub-sub`).
-/// Returns the level (0 = top level) and the line without the dashes.
-pub fn split_level(raw: &str) -> (usize, &str) {
-    let n = raw.bytes().take_while(|&b| b == b'-').count();
-    if (1..=MAX_LEVEL).contains(&n) && raw.as_bytes().get(n) == Some(&b' ') {
-        (n, &raw[n + 1..])
+/// Level (1-4) of a leading `- `..`---- ` marker, and the text after it.
+fn dash_prefix(s: &str) -> Option<(usize, &str)> {
+    let n = s.bytes().take_while(|&b| b == b'-').count();
+    ((1..=MAX_LEVEL).contains(&n) && s.as_bytes().get(n) == Some(&b' ')).then(|| (n, &s[n + 1..]))
+}
+
+/// Byte length of the head of a line: `x DONE CREATED ` or `(P) CREATED ` (each part optional).
+fn head_len(s: &str) -> usize {
+    let date_at = |p: usize| s.get(p..p + 11).is_some_and(|w| is_date_shape(&w[..10]) && w.ends_with(' '));
+    let mut pos = 0;
+    if s.starts_with("x ") {
+        pos = 2;
+        if date_at(pos) {
+            pos += 11;
+            if date_at(pos) {
+                pos += 11;
+            }
+        }
     } else {
-        (0, raw)
+        if priority_prefix(s).is_some() {
+            pos = 4;
+        }
+        if date_at(pos) {
+            pos += 11;
+        }
+    }
+    pos
+}
+
+/// Sub-entries: one to four dashes and a space between the dates and the text
+/// (`(A) 2026-01-01 -- sub-sub`, `x 2026-01-02 2026-01-01 - sub`, `-- sub` without prefix).
+/// Old files with the dashes in front of everything (`-- (A) text`) are still read.
+/// Returns head (`x`/priority/dates incl. trailing space), level (0 = top level) and the text after the dashes.
+pub fn split_parts(raw: &str) -> (&str, usize, &str) {
+    let (lead, s) = dash_prefix(raw).unwrap_or((0, raw));
+    let (head, rest) = s.split_at(head_len(s));
+    match dash_prefix(rest) {
+        Some((n, body)) => (head, n, body),
+        None => (head, lead, rest),
     }
 }
 
 pub fn level_of(raw: &str) -> usize {
-    split_level(raw).0
+    split_parts(raw).1
 }
 
 /// `"-- "` for level 2, `""` for level 0.
@@ -39,7 +70,8 @@ pub fn level_prefix(n: usize) -> String {
 
 /// The line at another nesting level (0 removes the dashes).
 pub fn with_level(raw: &str, n: usize) -> String {
-    format!("{}{}", level_prefix(n), split_level(raw).1)
+    let (head, _, body) = split_parts(raw);
+    format!("{head}{}{body}", level_prefix(n))
 }
 
 /// Index of the last line of the sub-tree of line `i`: the lines below it with a deeper level
@@ -116,36 +148,25 @@ fn priority_prefix(s: &str) -> Option<char> {
 }
 
 pub fn parse(raw: &str) -> Task {
-    let (level, body) = split_level(raw);
+    let (head, level, body) = split_parts(raw);
     let mut t = Task { raw: raw.to_string(), level, ..Default::default() };
-    let mut rest = body;
-    if let Some(r) = rest.strip_prefix("x ") {
+    let mut toks = head.split(' ').filter(|w| !w.is_empty());
+    let first = toks.next();
+    if first == Some("x") {
         t.done = true;
-        rest = r;
-        if let Some((w, r2)) = split_word(rest) {
-            if is_date_shape(w) {
-                t.completed = Some(w.to_string());
-                rest = r2;
-                if let Some((w2, r3)) = split_word(rest) {
-                    if is_date_shape(w2) {
-                        t.created = Some(w2.to_string());
-                        rest = r3;
-                    }
-                }
-            }
-        }
+        t.completed = toks.next().map(str::to_string);
+        t.created = toks.next().map(str::to_string);
     } else {
-        if let Some(p) = priority_prefix(rest) {
-            t.priority = Some(p);
-            rest = &rest[4..];
-        }
-        if let Some((w, r)) = split_word(rest) {
-            if is_date_shape(w) {
-                t.created = Some(w.to_string());
-                rest = r;
+        let mut cur = first;
+        if let Some(w) = cur {
+            if w.starts_with('(') {
+                t.priority = w.chars().nth(1);
+                cur = toks.next();
             }
         }
+        t.created = cur.map(str::to_string);
     }
+    let rest = body;
     t.text = rest.to_string();
 
     for word in rest.split_whitespace() {
@@ -179,11 +200,12 @@ pub fn complete(raw: &str, today: &str) -> String {
     if t.done {
         return raw.to_string();
     }
-    let mut out = format!("{}x {today} ", level_prefix(t.level));
+    let mut out = format!("x {today} ");
     if let Some(c) = &t.created {
         out.push_str(c);
         out.push(' ');
     }
+    out.push_str(&level_prefix(t.level));
     out.push_str(&t.text);
     if let Some(p) = t.priority {
         if !t.tags.contains_key("pri") {
@@ -219,7 +241,7 @@ pub fn reopen(raw: &str) -> String {
     if !t.done {
         return raw.to_string();
     }
-    let mut out = level_prefix(t.level);
+    let mut out = String::new();
     if let Some(p) = t.priority {
         out.push_str(&format!("({p}) "));
     }
@@ -227,6 +249,7 @@ pub fn reopen(raw: &str) -> String {
         out.push_str(c);
         out.push(' ');
     }
+    out.push_str(&level_prefix(t.level));
     out.push_str(&remove_pri_tag(&t.text));
     out
 }
@@ -237,12 +260,12 @@ pub fn set_priority(raw: &str, priority: Option<char>) -> String {
     if t.done {
         return raw.to_string();
     }
-    let rest = split_level(raw).1;
-    let body = if priority_prefix(rest).is_some() { &rest[4..] } else { rest };
-    let pre = level_prefix(t.level);
+    let (head, level, body) = split_parts(raw);
+    let head = if priority_prefix(head).is_some() { &head[4..] } else { head };
+    let pre = level_prefix(level);
     match priority {
-        Some(p) => format!("{pre}({p}) {body}"),
-        None => format!("{pre}{body}"),
+        Some(p) => format!("({p}) {head}{pre}{body}"),
+        None => format!("{head}{pre}{body}"),
     }
 }
 
@@ -254,8 +277,8 @@ pub fn with_creation_date(raw: &str, today: &str) -> String {
     }
     let pre = level_prefix(t.level);
     match t.priority {
-        Some(p) => format!("{pre}({p}) {today} {}", t.text),
-        None => format!("{pre}{today} {}", t.text),
+        Some(p) => format!("({p}) {today} {pre}{}", t.text),
+        None => format!("{today} {pre}{}", t.text),
     }
 }
 
@@ -273,10 +296,10 @@ pub const SOON_DAYS: i64 = 3;
 
 /// A lower-case priority letter at the very start, `(a) text`, becomes `(A) text`.
 pub fn fix_priority_case(text: &str) -> String {
-    let (level, rest) = split_level(text);
+    let (pre, rest) = dash_prefix(text).map_or(("".to_string(), text), |(n, r)| (level_prefix(n), r));
     let b = rest.as_bytes();
     if b.len() >= 3 && b[0] == b'(' && b[1].is_ascii_lowercase() && b[2] == b')' {
-        format!("{}({}){}", level_prefix(level), (b[1] as char).to_ascii_uppercase(), &rest[3..])
+        format!("{pre}({}){}", (b[1] as char).to_ascii_uppercase(), &rest[3..])
     } else {
         text.to_string()
     }
@@ -486,17 +509,19 @@ mod tests {
 
     #[test]
     fn sub_entries() {
-        let t = parse("-- (A) 2026-01-02 call +x");
+        let t = parse("(A) 2026-01-02 -- call +x");
         assert_eq!((t.level, t.priority, t.created.as_deref(), t.text.as_str()), (2, Some('A'), Some("2026-01-02"), "call +x"));
+        assert_eq!(parse("-- (A) 2026-01-02 call +x").level, 2); // old form is still read
+        assert_eq!(parse("x 2026-02-03 2026-01-02 - job").level, 1);
         assert_eq!(parse("----- five").level, 0);
         assert_eq!(parse("-nospace").level, 0);
-        assert_eq!(complete("- 2026-01-02 job", "2026-02-03"), "- x 2026-02-03 2026-01-02 job");
-        assert_eq!(reopen("- x 2026-02-03 2026-01-02 job pri:B"), "- (B) 2026-01-02 job");
-        assert_eq!(set_priority("-- job", Some('C')), "-- (C) job");
-        assert_eq!(set_priority("-- (C) job", None), "-- job");
-        assert_eq!(with_creation_date("-- (C) job", "2026-05-05"), "-- (C) 2026-05-05 job");
-        assert_eq!(fix_priority_case("- (a) x"), "- (A) x");
-        assert_eq!(with_level("-- x", 1), "- x");
+        assert_eq!(complete("2026-01-02 - job", "2026-02-03"), "x 2026-02-03 2026-01-02 - job");
+        assert_eq!(reopen("x 2026-02-03 2026-01-02 - job pri:B"), "(B) 2026-01-02 - job");
+        assert_eq!(set_priority("-- job", Some('C')), "(C) -- job");
+        assert_eq!(set_priority("(C) 2026-01-01 -- job", None), "2026-01-01 -- job");
+        assert_eq!(with_creation_date("(C) -- job", "2026-05-05"), "(C) 2026-05-05 -- job");
+        assert_eq!(fix_priority_case("(a) x"), "(A) x");
+        assert_eq!(with_level("(A) 2026-01-01 -- x", 1), "(A) 2026-01-01 - x");
         assert_eq!(with_level("x", 9), "---- x");
         let l: Vec<String> = ["a", "- b", "-- c", "d"].iter().map(|s| s.to_string()).collect();
         assert_eq!(subtree_end(&l, 0), 2);

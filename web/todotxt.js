@@ -8,21 +8,31 @@ const PRIORITY_RE = /^\(([A-Z])\) /;
 const PRI_TAG_RE = /(?:^|\s)pri:[A-Z](?=\s|$)/;
 const TAG_RE = /^([^\s:]+):([^\s:]+)$/;
 
-// Sub-entries: one to four dashes and a space in front of the line (`- sub`, `-- sub-sub`, ... max `----`).
+// Sub-entries: one to four dashes and a space between the dates and the text
+// (`(A) 2026-01-01 -- sub-sub`, `x 2026-01-02 2026-01-01 - sub`, `-- sub` without prefix). max `----`.
+// Old files with the dashes in front of everything (`-- (A) text`) are still read and rewritten in the new form.
 const LEVEL_RE = /^(-{1,4}) /;
+const HEAD_RE = /^(?:x (?:\d{4}-\d{2}-\d{2} (?:\d{4}-\d{2}-\d{2} )?)?|(?:\([A-Z]\) )?(?:\d{4}-\d{2}-\d{2} )?)/;
 export const MAX_LEVEL = 4;
 
-/** Nesting level (0-4) of a raw line and the line without its dash prefix. */
-export function splitLevel(raw) {
+/** Split a raw line into the head (`x`/priority/dates incl. trailing space), nesting level (0-4) and the text after it. */
+export function splitParts(raw) {
+  let lead = 0;
+  let s = raw;
   const m = LEVEL_RE.exec(raw);
-  return m ? [m[1].length, raw.slice(m[0].length)] : [0, raw];
+  if (m) { lead = m[1].length; s = raw.slice(m[0].length); }
+  const head = HEAD_RE.exec(s)[0];
+  const rest = s.slice(head.length);
+  const m2 = LEVEL_RE.exec(rest);
+  return m2 ? { head, level: m2[1].length, body: rest.slice(m2[0].length) } : { head, level: lead, body: rest };
 }
-export const levelOf = (raw) => splitLevel(raw)[0];
+export const levelOf = (raw) => splitParts(raw).level;
 /** `'-- '` for level 2, `''` for level 0. */
 export const levelPrefix = (n) => (n > 0 ? '-'.repeat(Math.min(MAX_LEVEL, n)) + ' ' : '');
 /** The line at another nesting level (0 removes the dashes). */
 export function withLevel(raw, n) {
-  return levelPrefix(n) + splitLevel(raw)[1];
+  const p = splitParts(raw);
+  return p.head + levelPrefix(n) + p.body;
 }
 /** Index of the last line that belongs to the sub-tree of line `i` (the lines below it with a deeper level). */
 export function subtreeEnd(lines, i) {
@@ -66,33 +76,19 @@ export function parse(raw) {
     tags: {},
   };
 
-  let rest;
-  [task.level, rest] = splitLevel(raw);
-  if (rest.startsWith('x ')) {
+  const { head, level, body } = splitParts(raw);
+  task.level = level;
+  const toks = head.split(' ').filter(Boolean);
+  if (toks[0] === 'x') {
     task.done = true;
-    rest = rest.slice(2);
-    let m = /^(\S+) /.exec(rest);
-    if (m && DATE_RE.test(m[1])) {
-      task.completed = m[1];
-      rest = rest.slice(m[0].length);
-      m = /^(\S+) /.exec(rest);
-      if (m && DATE_RE.test(m[1])) {
-        task.created = m[1];
-        rest = rest.slice(m[0].length);
-      }
-    }
+    toks.shift();
+    task.completed = toks[0] || null;
+    task.created = toks[1] || null;
   } else {
-    const m = PRIORITY_RE.exec(rest);
-    if (m) {
-      task.priority = m[1];
-      rest = rest.slice(m[0].length);
-    }
-    const d = /^(\d{4}-\d{2}-\d{2}) /.exec(rest);
-    if (d) {
-      task.created = d[1];
-      rest = rest.slice(d[0].length);
-    }
+    if (toks[0] && toks[0][0] === '(') task.priority = toks.shift()[1];
+    task.created = toks[0] || null;
   }
+  const rest = body;
   task.text = rest;
 
   for (const word of rest.split(/\s+/)) {
@@ -114,9 +110,9 @@ export function parse(raw) {
 export function complete(raw, today = isoDate()) {
   const t = parse(raw);
   if (t.done) return raw;
-  let out = `${levelPrefix(t.level)}x ${today} `;
+  let out = `x ${today} `;
   if (t.created) out += `${t.created} `;
-  out += t.text;
+  out += levelPrefix(t.level) + t.text;
   if (t.priority && !t.tags.pri) out += ` pri:${t.priority}`;
   return out;
 }
@@ -126,25 +122,25 @@ export function reopen(raw) {
   const t = parse(raw);
   if (!t.done) return raw;
   const text = t.text.replace(PRI_TAG_RE, '').trim();
-  let out = levelPrefix(t.level);
+  let out = '';
   if (t.priority) out += `(${t.priority}) `;
   if (t.created) out += `${t.created} `;
-  return out + text;
+  return out + levelPrefix(t.level) + text;
 }
 
 /** Set (letter A-Z) or clear (null) the priority of an open task. */
 export function setPriority(raw, priority) {
   const t = parse(raw);
   if (t.done) return raw;
-  const body = splitLevel(raw)[1].replace(PRIORITY_RE, '');
-  return levelPrefix(t.level) + (priority ? `(${priority}) ${body}` : body);
+  const head = splitParts(raw).head.replace(PRIORITY_RE, '');
+  return (priority ? `(${priority}) ` : '') + head + levelPrefix(t.level) + t.text;
 }
 
 /** Prepend a creation date after the priority, unless one is present. */
 export function withCreationDate(raw, today = isoDate()) {
   const t = parse(raw);
   if (t.done || t.created) return raw;
-  return levelPrefix(t.level) + (t.priority ? `(${t.priority}) ` : '') + `${today} ${t.text}`;
+  return (t.priority ? `(${t.priority}) ` : '') + `${today} ${levelPrefix(t.level)}${t.text}`;
 }
 
 /** Days before the due date from which a task counts as 'soon' due. */
@@ -162,7 +158,7 @@ export function dueStatus(task, today = isoDate()) {
 
 /** A lower-case priority letter at the very start, `(a) text`, becomes `(A) text`. */
 export function fixPriorityCase(text) {
-  return text.replace(/^((?:-{1,4} )?)\(([a-z])\)/, (_, pre, c) => `${pre}(${c.toUpperCase()})`);
+  return text.replace(/^(-{1,4} )?\(([a-z])\)/, (_, pre, c) => `${pre || ''}(${c.toUpperCase()})`);
 }
 
 /** All note names of a task (`note:NAME` words, without extension), in order: a task can have several notes. */

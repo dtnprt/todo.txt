@@ -104,10 +104,11 @@ const state = {
   minimal: false,
   statusBar: true,
   touchBar: isAndroid || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches),   // helper bar under the input (touch screens); Settings -> General
+  noCapture: false,     // desktop only (todo.cfg `nocapture=`): hide the window from screenshots / screen sharing
   onTop: false,         // desktop only (todo.cfg `ontop=`)
   theme: '',            // name of a file in web/themes (without .css); '' = built-in light/dark
   autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
-  frameless: false,    // desktop only; stored in todo.cfg (`frameless=`)
+  frameless: !isAndroid,   // desktop: always without the system frame (own window buttons); render() only applies it when running in Tauri
   cornerName: true,    // minimal mode: small file name in the bottom left corner
   showDates: false,    // show created/done dates inside the entries (else only tooltip + status bar on hover)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
@@ -1001,9 +1002,9 @@ async function loadAutoSave() {
     state.autoSave = /^\s*autosave\s*=/m.test(cfg) ? flag('autosave') : isAndroid;
     state.lineNumbers = flag('linenumbers');
     state.davCache = davFast = /^\s*davcache\s*=/m.test(cfg) ? flag('davcache') : true;
-    state.frameless = flag('frameless');
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
     state.onTop = flag('ontop');
+    state.noCapture = flag('nocapture');
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
     if (/^\s*showdates\s*=/m.test(cfg)) state.showDates = flag('showdates');
     if (/^\s*cornername\s*=/m.test(cfg)) state.cornerName = flag('cornername');
@@ -1644,9 +1645,8 @@ function render() {
   $('#autoSaveToggle').setAttribute('aria-checked', state.autoSave);
   $('#lineNoToggle').style.display = isTauri ? '' : 'none';
   $('#lineNoToggle').setAttribute('aria-checked', state.lineNumbers);
-  $('#framelessToggle').style.display = isTauri ? '' : 'none';
-  $('#framelessToggle').setAttribute('aria-checked', state.frameless);
   $('#winCtl').hidden = !(isTauri && state.frameless);
+  applyRoundCorners();
   applyWindowFx();
   if (isTauri && appliedFrameless !== state.frameless) {
     appliedFrameless = state.frameless;
@@ -2133,12 +2133,20 @@ $('#autoSaveToggle').onclick = () => {
 };
 let appliedFrameless = null;
 let appliedOnTop = null;
+let appliedNoCapture = null;
 
 // Window effects (desktop): always on top.
 function applyWindowFx() {
   $('#onTopToggle').style.display = isTauri ? '' : 'none';
   $('#onTopToggle').setAttribute('aria-checked', state.onTop);
+  $('#noCaptureToggle').style.display = isTauri ? '' : 'none';
+  $('#noCaptureToggle').setAttribute('aria-checked', state.noCapture);
   if (!isTauri) return;
+  if (appliedNoCapture !== state.noCapture) {
+    appliedNoCapture = state.noCapture;
+    // Windows: SetWindowDisplayAffinity (WDA_EXCLUDEFROMCAPTURE), macOS: NSWindow sharingType
+    try { tauri.window.getCurrentWindow().setContentProtected(state.noCapture).catch(() => {}); } catch { /* ignore */ }
+  }
   if (appliedOnTop !== state.onTop) {
     appliedOnTop = state.onTop;
     try { tauri.window.getCurrentWindow().setAlwaysOnTop(state.onTop).catch(() => {}); } catch { /* ignore */ }
@@ -2146,16 +2154,18 @@ function applyWindowFx() {
 }
 function toggleOnTop() { if (!isTauri) return; state.onTop = !state.onTop; setCfg('ontop', state.onTop); render(); }
 $('#onTopToggle').onclick = toggleOnTop;
-function toggleFrameless() {
-  if (!isTauri) return;
-  state.frameless = !state.frameless;
-  setCfg('frameless', state.frameless);
-  render();
-}
-$('#framelessToggle').onclick = toggleFrameless;
+$('#noCaptureToggle').onclick = () => { if (!isTauri) return; state.noCapture = !state.noCapture; setCfg('nocapture', state.noCapture); render(); };
 const win = () => tauri.window.getCurrentWindow();
 $('#winMin').onclick = () => win().minimize();
 $('#winClose').onclick = () => win().close();
+// Linux: the frameless window is transparent (src-tauri/tauri.linux.conf.json); the theme token --win-radius rounds the corners
+// (style.css `html.win-round`). Square again when the window fills the screen.
+const isLinuxDesktop = isTauri && !isAndroid && /Linux/.test(navigator.userAgent);
+function applyRoundCorners() {
+  const full = innerWidth >= screen.availWidth - 1 && innerHeight >= screen.availHeight - 1;
+  document.documentElement.classList.toggle('win-round', isLinuxDesktop && state.frameless && !full);
+}
+addEventListener('resize', applyRoundCorners);
 // Frameless: drag the window by any empty area (top bar gaps, space around the entries); double click = maximize.
 document.addEventListener('mousedown', (e) => {
   if (!isTauri || !state.frameless || e.button !== 0) return;
@@ -2277,7 +2287,7 @@ function toggleHelp() {
   if (old) { old.remove(); return; }
   const rows = [
     ['F1', 'This help'], ['F2', 'Next sort order'], ['F3', 'Show / hide completed'],
-    ['F8', 'File / folder selector'], ['F4', 'Show / hide sidebar'], ['F5', 'Archive done tasks'], ['F6', 'Calendar when typing dates on / off'], ['F9', 'Always on top (desktop)'], ['F11', 'Minimal mode (menu bar on hover at the top)'], ['F12', 'Window frame on / off (desktop)'], ['Ctrl+R', 'Reload file from disk'],
+    ['F8', 'File / folder selector'], ['F4', 'Show / hide sidebar'], ['F5', 'Archive done tasks'], ['F6', 'Calendar when typing dates on / off'], ['F9', 'Always on top (desktop)'], ['F11', 'Minimal mode (menu bar on hover at the top)'], ['Ctrl+R', 'Reload file from disk'],
     ['Ctrl+S', 'Save'], ['Ctrl+Z', 'Undo (list)'], ['/', 'Search'],
   ];
   const box = el('div', { className: 'help-box' }, el('h2', {}, 'Keys'),
@@ -2303,11 +2313,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'F9' && !e.ctrlKey && !e.altKey && !e.metaKey) {   // desktop window effects
     e.preventDefault();
     toggleOnTop();
-    return;
-  }
-  if (e.key === 'F12' && !e.ctrlKey && !e.altKey && !e.metaKey) {      // window frame on/off (desktop)
-    e.preventDefault();
-    if (isTauri) toggleFrameless();
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'r') {    // reload file from disk

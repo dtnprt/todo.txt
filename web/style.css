@@ -16,6 +16,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding-bottom: 28px; background-color: var(--bg); background-image: var(--bg-image, none); background-attachment: fixed; background-repeat: no-repeat; background-size: cover; color: var(--text); font: var(--font-size, 15px)/1.45 var(--font, system-ui, -apple-system, "Segoe UI", sans-serif); }
+/* Linux frameless window is transparent: the page is clipped to rounded corners (theme token --win-radius, 0 = square) */
+:root { --win-radius: 10px; }
+html.win-round { background: transparent; }
+html.win-round body { clip-path: inset(0 round var(--win-radius)); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
 button:hover:not(:disabled) { background: var(--hover); }
@@ -478,3 +482,15 @@ body.minimal.show-input .dav-corner, body.minimal:has(.composer:focus-within) .d
 .move-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; max-height: 72px; overflow: auto; }
 .move-preview { max-height: 30vh; }
 .move-err { color: var(--danger); }
+
+/* Desktop/browser: the window itself never scrolls. Top bar, input and status bar stay put; only the entry list
+   (and, separately, the sidebar) scrolls. Android keeps its own block layout. */
+html:not(:has(body.android)), html:not(:has(body.android)) body { height: 100vh; overflow: hidden; }
+body:not(.android) .layout { flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr) auto; }
+body:not(.android) #list, body:not(.android) #raw { align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+body:not(.android) .sidebar { position: static; align-self: stretch; max-height: none; min-height: 0; overflow-y: auto; }
+body:not(.android) .composer { position: relative; bottom: auto; }
+body:not(.android).minimal .composer { position: fixed; bottom: 0; }
+body:not(.android).minimal .sidebar { top: auto; max-height: none; }
+/* minimal mode: the input bar floats over the list, so the list gets room below the last entry to scroll it clear of the bar */
+body:not(.android).minimal #list, body:not(.android).minimal #raw { padding-bottom: calc(var(--composer-h, 76px) + 8px); box-sizing: border-box; }

@@ -1,5 +1,5 @@
 /* E-Ink: greyscale only, flat, no shadows, no blur, no transitions, serif - for e-paper displays and tired eyes */
-:root {
+:root { --win-radius: 0;
   --bg: #e9e8e3;
   --panel: #f3f2ed;
   --hover: #dcdbd5;

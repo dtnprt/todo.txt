@@ -1,5 +1,5 @@
 /* Terminal (green phosphor): monospace on black, square corners, faint scanlines */
-:root {
+:root { --win-radius: 0;
   --bg: #000000;
   --panel: #000000;
   --hover: #33ff3322;

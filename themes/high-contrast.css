@@ -1,5 +1,5 @@
 /* High contrast: black / white / yellow, strong borders */
-:root {
+:root { --win-radius: 0;
   --bg: #000000;
   --panel: #000000;
   --hover: #262626;

@@ -1,0 +1,17 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "todo.txt",
+        "width": 1100,
+        "height": 800,
+        "minWidth": 520,
+        "minHeight": 400,
+        "decorations": false,
+        "transparent": true,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

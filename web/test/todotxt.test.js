@@ -122,20 +122,22 @@ test('noteNames / nextNoteName', () => {
 });
 
 test('sub-entries', () => {
-  const t = T.parse('-- (A) 2026-01-02 call +x');
+  const t = T.parse('(A) 2026-01-02 -- call +x');
   assert.equal(t.level, 2);
   assert.equal(t.priority, 'A');
   assert.equal(t.created, '2026-01-02');
   assert.equal(t.text, 'call +x');
+  assert.equal(T.parse('-- (A) 2026-01-02 call +x').level, 2); // old form is still read
+  assert.equal(T.parse('x 2026-02-03 2026-01-02 - job').level, 1);
   assert.equal(T.parse('----- five').level, 0);
   assert.equal(T.parse('-nospace').level, 0);
-  assert.equal(T.complete('- 2026-01-02 job', '2026-02-03'), '- x 2026-02-03 2026-01-02 job');
-  assert.equal(T.reopen('- x 2026-02-03 2026-01-02 job pri:B'), '- (B) 2026-01-02 job');
-  assert.equal(T.setPriority('-- job', 'C'), '-- (C) job');
-  assert.equal(T.setPriority('-- (C) job', null), '-- job');
-  assert.equal(T.withCreationDate('-- (C) job', '2026-05-05'), '-- (C) 2026-05-05 job');
-  assert.equal(T.fixPriorityCase('- (a) x'), '- (A) x');
-  assert.equal(T.withLevel('-- x', 1), '- x');
+  assert.equal(T.complete('2026-01-02 - job', '2026-02-03'), 'x 2026-02-03 2026-01-02 - job');
+  assert.equal(T.reopen('x 2026-02-03 2026-01-02 - job pri:B'), '(B) 2026-01-02 - job');
+  assert.equal(T.setPriority('-- job', 'C'), '(C) -- job');
+  assert.equal(T.setPriority('(C) 2026-01-01 -- job', null), '2026-01-01 -- job');
+  assert.equal(T.withCreationDate('(C) -- job', '2026-05-05'), '(C) 2026-05-05 -- job');
+  assert.equal(T.fixPriorityCase('(a) x'), '(A) x');
+  assert.equal(T.withLevel('(A) 2026-01-01 -- x', 1), '(A) 2026-01-01 - x');
   assert.equal(T.withLevel('x', 9), '---- x');
   const L = ['a', '- b', '-- c', 'd'];
   assert.equal(T.subtreeEnd(L, 0), 2);
