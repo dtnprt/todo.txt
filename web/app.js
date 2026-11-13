@@ -506,7 +506,8 @@ function browserStorageDialog() {
     if (!names.length) body.append(el('p', { className: 'set-hint', textContent: 'No lists in the browser storage yet.' }));
     for (const n of names) {
       const raw = localStorage.getItem(LIST_KEY + n) || '';
-      const info = C.isEncrypted(raw) ? 'encrypted' : `${raw.split(/\r?\n/).filter((l) => l.trim()).length} tasks`;
+      const cnt = raw.split(/\r?\n/).filter((l) => l.trim()).length;
+      const info = C.isEncrypted(raw) ? 'encrypted' : `${cnt} ${cnt === 1 ? 'task' : 'tasks'}`;
       body.append(el('div', { className: 'bs-row' },
         el('span', { className: 'bs-name', textContent: n + (n === state.browserList ? ' (open)' : '') }),
         el('small', { textContent: info }),

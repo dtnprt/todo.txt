@@ -1636,7 +1636,7 @@ dependencies = [
 
 [[package]]
 name = "todo-cli"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "aes-gcm",
  "auth-git2",
