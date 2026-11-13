@@ -3222,11 +3222,13 @@ document.addEventListener('keydown', (e) => {
     undo();
   } else if (!typing && e.key === '/') {
     e.preventDefault();
+    document.body.classList.add('show-input');   // minimal mode: the input bar is hidden until it is needed
     composer.setMode('search');
   } else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && e.key !== ' '
              && !document.activeElement?.isContentEditable) {
     // Nothing is taking text input: send typing to the add/search bar.
     // Focusing during keydown lets the same keystroke land in the input.
+    document.body.classList.add('show-input');   // minimal mode: show the (hidden) bar first, a hidden element cannot take the focus
     $('#addInput').focus();
   }
 });

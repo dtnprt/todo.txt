@@ -602,9 +602,11 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
 .recent-clear { border: 0; background: none; text-align: left; padding: 4px 8px; color: var(--muted); }
 .sub-caret { margin-left: auto; }
 
-/* Minimal mode = the normal layout without top bar and status bar: the input bar sits below the list (in the layout, always
-   visible), nothing floats over the entries any more. */
-body:not(.android).minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1 !important; transform: none !important; pointer-events: auto !important; z-index: auto; }
+/* Minimal mode = the normal layout without top bar and status bar. The input bar sits below the list (in the layout, nothing floats
+   over the entries) and is only there while the mouse is over the window or the bar has the focus; the list box shrinks upwards by
+   exactly the height of the bar and grows back when it goes away. */
+body:not(.android).minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1; transform: none; pointer-events: auto; z-index: auto; }
+body:not(.android).minimal:not(.show-input) .composer:not(:focus-within) { display: none; }
 body:not(.android).minimal .layout { padding-bottom: 0; }
 body:not(.android).minimal #list > .task:last-child { margin-bottom: 0 !important; }
 /* minimal mode: no offsets are left over from the old floating input bar (they would shift the relative bar sideways) */
