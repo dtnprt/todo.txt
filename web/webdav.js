@@ -60,7 +60,7 @@ export function createWebdav(ctx) {
         el('span', { className: 'dav-url', title: entry }, el('b', {}, s ? s.user : '?'), ' @ ', s ? s.url : entry),
         el('button', { type: 'button', textContent: 'Browse…', onclick: () => { pane.closest('#settings').hidden = true; openBrowser(entry); } }),
         el('button', { type: 'button', className: 'danger', title: 'Remove server and delete its password from the keyring', onclick: async () => {
-          if (!confirm(`Remove ${entry}? The stored password is deleted from the keyring.`)) return;
+          if (!(await ctx.ui.confirm(`Remove ${entry}? The stored password is deleted from the keyring.`))) return;
           try { await ctx.invoke('webdav_logout', { entry }); } catch (e) { say(msg, String(e)); return; }
           ctx.setServers(ctx.servers().filter((x) => x !== entry));
           renderPane(pane);
@@ -106,7 +106,7 @@ export function createWebdav(ctx) {
   function openBrowser(startEntry) {
     if (document.getElementById('davDlg')) return;
     const servers = ctx.servers();
-    if (!servers.length) return alert('Add a WebDAV server first (Settings → WebDAV).');
+    if (!servers.length) return ctx.ui.alert('Add a WebDAV server first (Settings → WebDAV).');
     const cur = ctx.currentUrl();
     const hit = cur ? serverFor(servers, cur) : null;
     let entry = startEntry || (hit ? hit.entry : servers[0]);
@@ -155,7 +155,7 @@ export function createWebdav(ctx) {
       if (!u) return;
       try {
         const have = await ctx.invoke('webdav_get', { entry, url: u });
-        if (!have.missing) { if (!confirm(`${name.value} exists already. Open it?`)) return; }
+        if (!have.missing) { if (!(await ctx.ui.confirm(`${name.value} exists already. Open it?`))) return; }
         else await ctx.invoke('webdav_put', { entry, url: u, text: '', etag: null });
         await ctx.openUrl(u);
         close();
@@ -166,7 +166,7 @@ export function createWebdav(ctx) {
       if (!u) return;
       try {
         const have = await ctx.invoke('webdav_get', { entry, url: u });
-        if (!have.missing && !confirm(`${name.value} exists on the server. Overwrite it with the open list?`)) return;
+        if (!have.missing && !(await ctx.ui.confirm(`${name.value} exists on the server. Overwrite it with the open list?`))) return;
         await ctx.saveAs(u);
         close();
       } catch (e) { say(msg, String(e)); }

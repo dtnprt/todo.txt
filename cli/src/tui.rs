@@ -421,6 +421,10 @@ impl App {
                         c.folder = f2;
                     });
                 }
+                {
+                    let p3 = path.clone();
+                    config::update(|c| c.push_recent(&p3));
+                }
                 self.path = path;
                 self.folder = folder;
                 self.msg = Some(format!("Opened {name}"));

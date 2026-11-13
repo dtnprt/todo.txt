@@ -26,6 +26,8 @@ pub fn config_path() -> PathBuf {
     new
 }
 
+pub const MAX_RECENT: usize = 20;
+
 #[derive(Debug, Default, Clone)]
 pub struct Config {
     /// The todo.txt that was used last.
@@ -44,6 +46,8 @@ pub struct Config {
     pub statusbar: Option<bool>,
     /// All known todo.txt files (`files=["a","b"]`, JSON array, shared with the desktop app).
     pub files: Vec<PathBuf>,
+    /// The last 20 files opened by any client, newest first, known or not (`recent=[...]`, JSON array, shared with the desktop app).
+    pub recent: Vec<PathBuf>,
     /// WebDAV servers as `USER@URL` (`webdav=["a@https://host/dav/"]`, shared with the desktop app); passwords are in the keyring.
     pub webdav: Vec<String>,
     /// Keys this version does not know about.
@@ -74,10 +78,18 @@ impl Config {
                 "statusbar" => cfg.statusbar = parse_bool(v),
                 "webdav" => cfg.webdav = parse_json_strings(v),
                 "files" => cfg.files = parse_json_strings(v).into_iter().map(PathBuf::from).collect(),
+                "recent" => cfg.recent = parse_json_strings(v).into_iter().map(PathBuf::from).collect(),
                 _ => cfg.other.push((k.to_string(), v.to_string())),
             }
         }
         cfg
+    }
+
+    /// Put `path` at the top of the recent files (at most `MAX_RECENT`, no duplicates).
+    pub fn push_recent(&mut self, path: &std::path::Path) {
+        self.recent.retain(|p| p != path);
+        self.recent.insert(0, path.to_path_buf());
+        self.recent.truncate(MAX_RECENT);
     }
 
     /// Set a key this module does not know about (kept in the file as is).
@@ -113,6 +125,10 @@ impl Config {
         if !self.files.is_empty() {
             let items: Vec<String> = self.files.iter().map(|f| json_string(&f.display().to_string())).collect();
             out.push_str(&format!("files=[{}]\n", items.join(",")));
+        }
+        if !self.recent.is_empty() {
+            let items: Vec<String> = self.recent.iter().map(|f| json_string(&f.display().to_string())).collect();
+            out.push_str(&format!("recent=[{}]\n", items.join(",")));
         }
         if !self.webdav.is_empty() {
             let items: Vec<String> = self.webdav.iter().map(|f| json_string(f)).collect();

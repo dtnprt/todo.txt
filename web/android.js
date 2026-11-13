@@ -89,7 +89,7 @@ export function openFiles(deps, { focusNew = false } = {}) {
     const dest = join(to.path, name);
     try {
       const wasCurrent = path === deps.state.path;
-      if (wasCurrent && !deps.confirmDiscard()) return;
+      if (wasCurrent && !(await deps.confirmDiscard())) return;
       await deps.invoke('move_file', { from: path, to: dest });
       say(`Moved ${name} to ${to.label}.`);
       deps.onMoved(path, dest, wasCurrent);
@@ -98,7 +98,7 @@ export function openFiles(deps, { focusNew = false } = {}) {
   }
 
   async function del(path, name) {
-    if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+    if (!(await deps.ui.confirm(`Delete ${name}? This cannot be undone.`))) return;
     try {
       await deps.invoke('delete_file', { path });
       deps.onGone(path);

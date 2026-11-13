@@ -106,6 +106,8 @@ const state = {
   sidebar: !isAndroid,   // Android: the filter drawer, closed at start
   calendar: true,
   minimal: false,
+  opened: [],          // desktop: files opened in this window that are still open (shown in the file menu even when unknown)
+  recent: [],          // desktop: the last 20 opened files, newest first (todo.cfg `recent=`)
   browserList: null,   // web: name of the list kept in the browser storage (localStorage), see browserStorageDialog
   statusBar: true,
   scrollbars: true,    // thin themed scrollbars (visible on hover / while scrolling); Settings -> View
@@ -130,7 +132,7 @@ let parentRaw = null;  // text of that line (line numbers move when the list is 
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      lines: state.browserList && webEncrypt ? null : state.lines, browserList: state.browserList, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
+      lines: state.browserList && webEncrypt ? null : state.lines, browserList: state.browserList, opened: state.opened, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
       sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, scrollbars: state.scrollbars, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
@@ -153,6 +155,7 @@ function restore() {
       if (s.lines === null) pendingBrowserList = s.browserList;   // saved without the plain text (encryption): reopen it from the storage
     }
     state.fileName = s.fileName || 'todo.txt';
+    if (isTauri && Array.isArray(s.opened)) state.opened = s.opened.filter((p) => typeof p === 'string' && p);
     state.dirty = !!s.dirty;
     state.path = isTauri && typeof s.path === 'string' ? s.path : null;
     state.folder = isTauri && !isAndroid && typeof s.folder === 'string' ? s.folder : null;   // no folder mode on Android
@@ -283,7 +286,7 @@ async function writeAny(p, text) {
     r = await withUnlock(() => invoke('webdav_put', { entry, url: p, text, etag: davEtag }));
   } catch (e) {
     if (!String(e).startsWith('conflict:')) throw e;
-    if (!confirm('The file was changed on the server meanwhile.\nOverwrite it with your version? (Cancel keeps the server version; use File → Reload from disk to load it.)')) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
+    if (!(await uiConfirm('The file was changed on the server meanwhile.\nOverwrite it with your version? (Cancel keeps the server version; use File → Reload from disk to load it.)'))) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
     r = await invoke('webdav_put', { entry, url: p, text, etag: null });
   }
   davEtag = r.etag;
@@ -318,7 +321,13 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   // shared with the CLI/TUI: they follow the file chosen here - but not a file from a folder unknown to them
   if (isTauri && path && path !== state.path) isKnownFile(path).then((k) => { if (k) { lastSeenLast = path; setCfg('lastfile', path); } });
   state.path = path;
-  if (path) seenFiles.add(path);
+  if (path) {
+    seenFiles.add(path);
+    if (isTauri && !isAndroid) {
+      if (!state.opened.includes(path)) state.opened.push(path);
+      pushRecent(path);
+    }
+  }
   diskText = path || handle ? text : null;
   state.dirty = false;
   state.editing = null;
@@ -447,9 +456,9 @@ async function writeBrowserList(name, text) {
 
 async function openBrowserList(name) {
   const raw = localStorage.getItem(LIST_KEY + name);
-  if (raw === null) { alert(`There is no list "${name}" in the browser storage.`); return; }
+  if (raw === null) { uiAlert(`There is no list "${name}" in the browser storage.`); return; }
   let text;
-  try { text = await webDecode(raw); } catch (e) { alert(`Could not open "${name}": ${e.message || e}`); return; }
+  try { text = await webDecode(raw); } catch (e) { uiAlert(`Could not open "${name}": ${e.message || e}`); return; }
   leaveFolder();
   loadText(text, name);
   state.browserList = name;
@@ -474,7 +483,7 @@ function browserStorageDialog() {
       body.append(el('div', { className: 'bs-row' },
         el('span', { className: 'bs-name', textContent: n + (n === state.browserList ? ' (open)' : '') }),
         el('small', { textContent: info }),
-        el('button', { type: 'button', textContent: 'Open', onclick: async () => { if (!confirmDiscard()) return; close(); await openBrowserList(n); } }),
+        el('button', { type: 'button', textContent: 'Open', onclick: async () => { if (!(await confirmDiscard())) return; close(); await openBrowserList(n); } }),
         el('button', { type: 'button', textContent: 'Download', title: 'Save a copy as a .txt file', onclick: async () => {
           try {
             const text = await webDecode(raw);
@@ -485,8 +494,8 @@ function browserStorageDialog() {
             setTimeout(() => URL.revokeObjectURL(a.href), 1000);
           } catch (e) { err.textContent = String(e.message || e); }
         } }),
-        el('button', { type: 'button', textContent: 'Delete', onclick: () => {
-          if (!confirm(`Delete "${n}" from the browser storage? This cannot be undone.`)) return;
+        el('button', { type: 'button', textContent: 'Delete', onclick: async () => {
+          if (!(await uiConfirm(`Delete "${n}" from the browser storage? This cannot be undone.`))) return;
           try { localStorage.removeItem(LIST_KEY + n); } catch { /* ignore */ }
           if (state.browserList === n) { state.browserList = null; persist(); render(); }
           draw();
@@ -503,7 +512,7 @@ function browserStorageDialog() {
     const n = target();
     if (!n) return;
     if (localStorage.getItem(LIST_KEY + n) !== null) { err.textContent = `"${n}" exists already: open it from the list.`; return; }
-    if (!confirmDiscard()) return;
+    if (!(await confirmDiscard())) return;
     try { await writeBrowserList(n, ''); } catch (e) { err.textContent = String(e.message || e); return; }
     close();
     await openBrowserList(n);
@@ -511,7 +520,7 @@ function browserStorageDialog() {
   const saveHere = async () => {
     const n = target();
     if (!n) return;
-    if (localStorage.getItem(LIST_KEY + n) !== null && n !== state.browserList && !confirm(`Replace the list "${n}" in the browser storage?`)) return;
+    if (localStorage.getItem(LIST_KEY + n) !== null && n !== state.browserList && !(await uiConfirm(`Replace the list "${n}" in the browser storage?`))) return;
     try { applySortToLines(); await writeBrowserList(n, T.serializeFile(state.lines)); } catch (e) { err.textContent = String(e.message || e); return; }
     state.browserList = n;
     state.fileName = n;
@@ -641,11 +650,11 @@ async function setEncryption(on) {
     const n = await invoke('crypt_convert', { folder: t.folder, files: t.files, encrypt: on, newPassword: null });
     // a WebDAV list is not converted on disk: write it again so it is stored in the new form
     if (state.path && isRemote(state.path)) { state.dirty = true; await save(); }
-    alert(on ? `Encryption is on. ${n} local file(s) encrypted.` : `Encryption is off. ${n} local file(s) decrypted.`);
+    uiAlert(on ? `Encryption is on. ${n} local file(s) encrypted.` : `Encryption is off. ${n} local file(s) decrypted.`);
   } catch (e) {
     await invoke('crypt_set_enabled', { on: !on }).catch(() => {});
     await setCfgNow('encrypt', !on);
-    alert(`Could not ${on ? 'encrypt' : 'decrypt'}: ${e}`);
+    uiAlert(`Could not ${on ? 'encrypt' : 'decrypt'}: ${e}`);
   }
   refreshSecurity();
 }
@@ -671,12 +680,12 @@ async function changePassword() {
       const t = cryptTargets();
       const n = await invoke('crypt_convert', { folder: t.folder, files: t.files, encrypt: true, newPassword: a.password });
       if (state.path && isRemote(state.path)) { state.dirty = true; await save(); }
-      alert(`Password changed. ${n} local file(s) re-encrypted.`);
+      uiAlert(`Password changed. ${n} local file(s) re-encrypted.`);
     } else {
       await invoke('crypt_unlock', { password: a.password });
     }
     if (a.remember) await invoke('crypt_remember');
-  } catch (e) { alert(`Could not change the password: ${e}`); }
+  } catch (e) { uiAlert(`Could not change the password: ${e}`); }
   refreshSecurity();
 }
 
@@ -686,13 +695,13 @@ $('#encStore').onclick = async () => {
   try {
     const st = await invoke('crypt_status');
     if (st.stored) await invoke('crypt_forget'); else await invoke('crypt_remember');
-  } catch (e) { alert(String(e)); }
+  } catch (e) { uiAlert(String(e)); }
   refreshSecurity();
 };
 $('#encHello').onclick = async () => {
   const st = await invoke('crypt_status');
   if (!st.hello_available) return;
-  if (!st.hello && !(await invoke('crypt_verify').catch(() => false))) { alert('Windows Hello did not confirm. The setting stays off.'); return; }
+  if (!st.hello && !(await invoke('crypt_verify').catch(() => false))) { uiAlert('Windows Hello did not confirm. The setting stays off.'); return; }
   await setCfgNow('encrypt_hello', !st.hello);
   refreshSecurity();
 };
@@ -716,7 +725,7 @@ const knownPaths = () => {
 
 async function refreshFileInfo(force = false) {
   if (!isTauri || isAndroid) return;
-  const paths = knownPaths();
+  const paths = [...new Set([...menuPaths(), ...state.recent])];
   const key = paths.join('\n');
   if (!force && key === fileInfoKey && Date.now() - fileInfoAt < 10000) return;
   fileInfoKey = key;
@@ -724,7 +733,7 @@ async function refreshFileInfo(force = false) {
   try {
     const list = await invoke('file_info', { paths });
     const next = Object.fromEntries(list.map((i) => [i.path, i]));
-    if (JSON.stringify(next) !== JSON.stringify(fileInfo)) { fileInfo = next; renderFileList(); renderKnownFiles(); }
+    if (JSON.stringify(next) !== JSON.stringify(fileInfo)) { fileInfo = next; renderFileList(); renderKnownFiles(); renderRecent(); }
   } catch { /* keep what we know */ }
 }
 
@@ -759,9 +768,43 @@ function renderKnownFiles() {
   box.replaceChildren(...rows);
 }
 
+// ---------- open files and recent files ----------
+// `state.opened`: every file opened in this window stays in the file menu until it is closed (the X), known or not.
+// `state.recent`: the last 20 files opened (known or not), newest first; stored in todo.cfg (`recent=`, shared with the terminal app).
+const MAX_RECENT = 20;
+const menuPaths = () => {
+  const out = knownPaths();
+  for (const p of state.opened) if (!out.includes(p)) out.push(p);
+  return out;
+};
+
+function pushRecent(path) {
+  if (!isTauri || isAndroid || !path) return;
+  state.recent = [path, ...state.recent.filter((p) => p !== path)].slice(0, MAX_RECENT);
+  setCfg('recent', JSON.stringify(state.recent));
+  renderRecent();
+}
+
+function renderRecent() {
+  const box = document.getElementById('recentList');
+  if (!box || !isTauri) return;
+  const rows = state.recent.map((p) => {
+    const k = kindOf(p);
+    const dir = isRemote(p) ? davHost(p) : baseName(p.slice(0, Math.max(0, p.length - baseName(p).length)).replace(/[\\/]+$/, ''));
+    const b = el('button', { role: 'menuitem', className: 'recent-item', title: `${KIND_LABEL[k]}: ${p}`, onclick: async () => { closeMenus(); await switchFile(p); } },
+      el('i', { className: `fa-solid fa-${KIND_ICON[k]} file-kind` }), isRemote(p) ? davName(p) : baseName(p), el('small', {}, dir));
+    if (p === state.path) b.setAttribute('aria-current', 'true');
+    return b;
+  });
+  if (!rows.length) rows.push(el('span', { className: 'side-empty', textContent: 'No recent files yet' }));
+  else rows.push(el('hr', { className: 'file-sep' }), el('button', { role: 'menuitem', className: 'recent-clear', data: {}, textContent: 'Clear the list', onclick: () => { state.recent = []; setCfg('recent', '[]'); renderRecent(); } }));
+  box.replaceChildren(...rows);
+  refreshFileInfo();
+}
+
 /** Encrypt / decrypt one file (an exception in the `.todotxt.cfg` of its folder) and rewrite it now. */
 async function setFileEncryption(p, on) {
-  if (on && !confirm('Encryption is EXPERIMENTAL. Encrypted files can no longer be read by other todo.txt apps, editors or scripts. Keep a backup.\n\nEncrypt this file?')) return;
+  if (on && !(await uiConfirm('Encryption is EXPERIMENTAL. Encrypted files can no longer be read by other todo.txt apps, editors or scripts. Keep a backup.\n\nEncrypt this file?'))) return;
   const entry = isRemote(p) ? davEntry(p) : null;
   try {
     if (on && !(await invoke('crypt_status')).unlocked) {
@@ -772,9 +815,28 @@ async function setFileEncryption(p, on) {
     }
     await withUnlock(() => invoke('crypt_set_file', { path: p, entry, encrypt: on, convert: true }));
     if (isRemote(p) && p === state.path) { state.dirty = true; await save(); }   // a remote list is written again in the new form
-  } catch (e) { alert(`Could not change the encryption of this file: ${e}`); }
+  } catch (e) { uiAlert(`Could not change the encryption of this file: ${e}`); }
   refreshFileInfo(true);
 }
+
+/** In-app dialog (an overlay of the page, not a native message box). Resolves to the index of the pressed button, null on Esc. */
+function uiDialog({ title = 'todo.txt', message, buttons, defaultIndex = 0 }) {
+  return new Promise((resolve) => {
+    const done = (v) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(null); } };
+    const btns = buttons.map((label, i) => el('button', { type: 'button', className: i === defaultIndex ? 'primary' : '', textContent: label, onclick: () => done(i) }));
+    const ov = el('div', { className: 'help ui-dialog' },
+      el('div', { className: 'help-box pw-box', role: 'dialog', 'aria-label': title },
+        el('h2', { textContent: title }),
+        el('p', { className: 'ui-msg', textContent: message }),
+        el('div', { className: 'pw-actions' }, ...btns)));
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(ov);
+    btns[defaultIndex].focus();
+  });
+}
+const uiConfirm = async (message, { title = 'todo.txt', ok = 'OK', cancel = 'Cancel' } = {}) => (await uiDialog({ title, message: String(message), buttons: [ok, cancel] })) === 0;
+const uiAlert = (message, { title = 'todo.txt' } = {}) => uiDialog({ title, message: String(message), buttons: ['OK'] }).then(() => undefined);
 
 /** Two-button question; resolves true / false, or null when cancelled. */
 function askChoice({ title, message, yes, no, defaultYes }) {
@@ -830,8 +892,8 @@ async function beforeFirstWrite(path) {
 
 // ---------- file I/O ----------
 
-function confirmDiscard() {
-  return !state.dirty || confirm('You have unsaved changes. Replace them?');
+async function confirmDiscard() {
+  return !state.dirty || (await uiConfirm('You have unsaved changes. Replace them?'));
 }
 
 // ---------- version (window title) ----------
@@ -918,11 +980,11 @@ for (const k of ['enabled', 'auto', 'pull', 'commit', 'push']) {
     try {
       state.git = await invoke('git_set', { dir: state.folder, key: k, on: !state.git[k] });
       render();
-    } catch (e) { alert(`git: ${e.message || e}`); }
+    } catch (e) { uiAlert(`git: ${e.message || e}`); }
   };
 }
 $('#gitInit').onclick = async () => {
-  try { setGitMsg(`git: ${await invoke('git_init', { dir: state.folder })}`); } catch (e) { alert(`git: ${e.message || e}`); }
+  try { setGitMsg(`git: ${await invoke('git_init', { dir: state.folder })}`); } catch (e) { uiAlert(`git: ${e.message || e}`); }
   loadGit();
 };
 $('#gitSync').onclick = async () => {
@@ -998,13 +1060,13 @@ async function openInFolder(name) {
 }
 
 async function switchFolderFile(name) {
-  if (name === state.fileName || !confirmDiscard()) return;
-  try { await openInFolder(name); } catch (e) { alert(`Could not open ${name}: ${e.message || e}`); }
+  if (name === state.fileName || !(await confirmDiscard())) return;
+  try { await openInFolder(name); } catch (e) { uiAlert(`Could not open ${name}: ${e.message || e}`); }
 }
 
 /** WebDAV folder mode: a folder URL on a server (all its .txt files can be switched between). */
 async function openFolderUrl(url) {
-  if (!confirmDiscard()) throw new Error('cancelled');
+  if (!(await confirmDiscard())) throw new Error('cancelled');
   state.folder = url.endsWith('/') ? url : `${url}/`;
   state.dirHandle = null;
   state.git = null;
@@ -1015,7 +1077,7 @@ async function openFolderUrl(url) {
 }
 
 async function openFolder() {
-  if (!confirmDiscard()) return;
+  if (!(await confirmDiscard())) return;
   try {
     if (isTauri) {
       const dir = await tauri.dialog.open({ multiple: false, directory: true });
@@ -1028,18 +1090,18 @@ async function openFolder() {
       state.dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
       state.folder = state.dirHandle.name;
     } else {
-      return alert('This browser cannot open folders.');
+      return uiAlert('This browser cannot open folders.');
     }
     state.folderFiles = [];
     await listFolder();
     await openInFolder(state.folderFiles.includes('todo.txt') ? 'todo.txt' : state.folderFiles[0] || 'todo.txt');
   } catch (e) {
-    if (e.name !== 'AbortError') alert(`Could not open folder: ${e.message || e}`);
+    if (e.name !== 'AbortError') uiAlert(`Could not open folder: ${e.message || e}`);
   }
 }
 
 async function openFile() {
-  if (!confirmDiscard()) return;
+  if (!(await confirmDiscard())) return;
   try {
     if (isTauri) {
       const p = await tauri.dialog.open({ multiple: false, directory: false, filters: TXT_FILTER });
@@ -1058,12 +1120,12 @@ async function openFile() {
       $('#fileInput').click();
     }
   } catch (e) {
-    if (e.name !== 'AbortError') alert(`Could not open file: ${e.message}`);
+    if (e.name !== 'AbortError') uiAlert(`Could not open file: ${e.message}`);
   }
 }
 
 async function openFromFileObject(file) {
-  if (!confirmDiscard()) return;
+  if (!(await confirmDiscard())) return;
   leaveFolder();
   loadText(await webDecode(await file.text()), file.name);
 }
@@ -1130,7 +1192,7 @@ async function save({ as = false } = {}) {
     persist();
     render();
   } catch (e) {
-    if (e.name !== 'AbortError') alert(`Could not save: ${e.message}`);
+    if (e.name !== 'AbortError') uiAlert(`Could not save: ${e.message}`);
   }
 }
 
@@ -1309,7 +1371,7 @@ async function readCurrent() {
 async function checkExternalChange(manual = false) {
   if (manual !== true) manual = false;
   if (checking || (!manual && state.editing !== null)) return;
-  if (!state.path && !state.handle) { if (manual) alert('No file is open.'); return; }
+  if (!state.path && !state.handle) { if (manual) uiAlert('No file is open.'); return; }
   checking = true;
   manualCheck = manual;
   try {
@@ -1326,7 +1388,7 @@ async function checkExternalChange(manual = false) {
     const diff = remote ? lineDiff(state.lines, newLines) : null;
     const wasDirty = state.dirty;
     if (wasDirty) {
-      const load = remote ? await showServerDiff(diff, true) : confirm('The file was changed on disk. Reload it and discard your unsaved changes?');
+      const load = remote ? await showServerDiff(diff, true) : (await uiConfirm('The file was changed on disk. Reload it and discard your unsaved changes?'));
       if (!load) return;
     }
     commit(newLines); // keeps an undo step
@@ -1337,7 +1399,7 @@ async function checkExternalChange(manual = false) {
     // shown when unsaved local changes had to be decided on (above) or after a merge on save.
   } catch (e) {
     console.warn('Reload failed:', e);
-    if (manual) alert(`Could not read file: ${e.message || e}`);
+    if (manual) uiAlert(`Could not read file: ${e.message || e}`);
   } finally {
     checking = false;
   }
@@ -1449,6 +1511,7 @@ const saveFiles = () => setCfg('files', JSON.stringify(state.files));
 // WebDAV (desktop): server list in todo.cfg (`webdav=["USER@URL"]`), file browser overlay, Settings pane (webdav.js)
 const dav = createWebdav({
   invoke,
+  ui: { alert: uiAlert, confirm: uiConfirm },
   servers: () => davServers,
   setServers: (list) => { davServers = list; setCfg('webdav', JSON.stringify(list)); },
   cacheOn: () => state.davCache,
@@ -1457,7 +1520,7 @@ const dav = createWebdav({
   canSaveHere: () => true,
   openFolderUrl: (url) => openFolderUrl(url),
   openUrl: async (url) => {
-    if (!confirmDiscard()) throw new Error('cancelled');
+    if (!(await confirmDiscard())) throw new Error('cancelled');
     const r = await readAny(url);
     leaveFolder();
     loadText(r.text, davName(url), null, url, r.etag);
@@ -1477,20 +1540,22 @@ const davHost = (u) => { try { return new URL(u).host; } catch { return ''; } };
 const davFileName = (p) => (isRemote(p) ? davName(p) : baseName(p));
 
 async function switchFile(p) {
-  if (p === state.path || !confirmDiscard()) return;
+  if (p === state.path || !(await confirmDiscard())) return;
   try {
     leaveFolder();
     const r = await readAny(p);
     loadText(r.text, davFileName(p), null, p, r.etag);
     rememberFile(p, true);
   } catch (e) {
-    alert(`Could not open ${p}: ${e.message || e}`);
+    uiAlert(`Could not open ${p}: ${e.message || e}`);
   }
 }
 
 function removeFromFiles(p) {
   state.files = state.files.filter((f) => f !== p);
+  state.opened = state.opened.filter((f) => f !== p);
   saveFiles();
+  persist();
   renderFileList();
 }
 
@@ -1514,7 +1579,7 @@ function renderFileList() {
     if (!state.folderFiles.length) rows.push(el('div', { className: 'side-empty' }, 'No .txt files'));
   } else if (isTauri) {
     // cloud, git and local files, separated by lines; every entry carries the icon of where it lives
-    const files = knownPaths();
+    const files = menuPaths();
     const fileRow = (p) => {
       const cur = p === state.path;
       const k = kindOf(p);
@@ -1527,7 +1592,7 @@ function renderFileList() {
         el('small', {}, isRemote(p) ? davHost(p) : baseName(dir)));
       pick.setAttribute('role', 'menuitemradio');
       pick.setAttribute('aria-checked', String(cur));
-      const rm = el('button', { className: 'file-rm', title: 'Remove from list', onclick: () => removeFromFiles(p) },
+      const rm = el('button', { className: 'file-rm', title: 'Close (remove from the list)', onclick: () => removeFromFiles(p) },
         el('i', { className: 'fa-solid fa-xmark' }));
       rm.dataset.keep = '';
       return el('div', { className: 'file-row' }, pick, rm);
@@ -1600,6 +1665,8 @@ async function openLastFile() {
       if (wm) { try { const a = JSON.parse(wm[1]); if (Array.isArray(a)) davServers = a.filter((x) => typeof x === 'string' && x); } catch { /* ignore */ } }
       const dm = cfg.match(/^\s*folder\s*=\s*(.+?)\s*$/m);
       if (dm && !isAndroid) state.folder = dm[1];
+      const rm = cfg.match(/^\s*recent\s*=\s*(.+?)\s*$/m);
+      if (rm) { try { const a = JSON.parse(rm[1]); if (Array.isArray(a)) { state.recent = a.filter((x) => typeof x === 'string' && x).slice(0, 20); renderRecent(); } } catch { /* ignore */ } }
       const fm = cfg.match(/^\s*files\s*=\s*(.+?)\s*$/m);
       if (fm) {
         try {
@@ -1628,7 +1695,7 @@ async function openLastFile() {
     if (state.dirty && state.path) return; // keep unsaved work from the last session
     for (const p of candidates) {
       let r;
-      try { r = await readAny(p); } catch (e) { if (isRemote(p)) alert(`Could not open ${p}:
+      try { r = await readAny(p); } catch (e) { if (isRemote(p)) uiAlert(`Could not open ${p}:
 ${e.message || e}`); continue; }
       if (r.missing) continue;
       if (p === state.path && r.text === diskText) return;
@@ -1641,10 +1708,10 @@ ${e.message || e}`); continue; }
 
 /** Desktop: write a .zip backup (dest = chosen file, or null for the backup folder). Resolves to the result or null. */
 async function makeBackup(dest) {
-  if (!isTauri || !state.path || isRemote(state.path)) { alert('A backup needs a local todo file (WebDAV lists are not backed up).'); return null; }
+  if (!isTauri || !state.path || isRemote(state.path)) { uiAlert('A backup needs a local todo file (WebDAV lists are not backed up).'); return null; }
   try {
     return await invoke('backup_create', { todo: state.path, folder: state.folder && !isRemote(state.folder) ? state.folder : null, dest });
-  } catch (e) { alert(`Backup failed: ${e}`); return null; }
+  } catch (e) { uiAlert(`Backup failed: ${e}`); return null; }
 }
 async function backupToZip() {
   const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
@@ -1652,14 +1719,14 @@ async function backupToZip() {
   const dest = await tauri.dialog.save({ defaultPath: `todo-backup-${stamp}.zip`, filters: [{ name: 'Zip archive', extensions: ['zip'] }] });
   if (!dest) return;
   const r = await makeBackup(dest);
-  if (r) alert(`Backup written:\n${r.path}\n(${r.files} file(s))`);
+  if (r) uiAlert(`Backup written:\n${r.path}\n(${r.files} file(s))`);
 }
 
 async function archiveDone() {
   const done = state.lines.filter((l) => T.parse(l).done);
   if (!done.length) return;
   const backup = isTauri && state.path && !isRemote(state.path) && await invoke('backup_on_archive').catch(() => false);
-  if (!confirm(`Save ${done.length} completed task(s) as done.txt and remove them from the list?${backup ? '\n\nA backup (.zip) is made first.' : ''}`)) return;
+  if (!(await uiConfirm(`Save ${done.length} completed task(s) as done.txt and remove them from the list?${backup ? '\n\nA backup (.zip) is made first.' : ''}`))) return;
   if (backup) {
     if (state.dirty) await save();   // the backup should contain what is on screen
     const r = await makeBackup(null);
@@ -1668,7 +1735,7 @@ async function archiveDone() {
   try {
     if (!(await download('done.txt', T.serializeFile(done)))) return;
   } catch (e) {
-    return alert(`Could not archive: ${e.message}`);
+    return uiAlert(`Could not archive: ${e.message}`);
   }
   commit(state.lines.filter((l) => !T.parse(l).done));
 }
@@ -1779,7 +1846,7 @@ document.addEventListener('paste', async (e) => {
   const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp' }[file.type] || 'png';
   const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
   const name = `img-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.${ext}`;
-  try { await writeImage(name, file); } catch (err) { alert(`Could not save the image: ${err}`); return; }
+  try { await writeImage(name, file); } catch (err) { uiAlert(`Could not save the image: ${err}`); return; }
   gitChanged(`images/${name}`);
   checkpoint(input);
   const a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
@@ -1815,7 +1882,7 @@ function noteDialog({ name, names, isNew, text, taken, onSave, onPick, onClose }
     if (!noteNameOk(n)) { err.textContent = 'Name: letters, digits, _ - . only'; nameIn.focus(); return false; }
     if (taken(n)) { err.textContent = `"${n}" is already used by another note`; nameIn.focus(); return false; }
     if (isNew && !ta.value.trim()) return true;   // nothing typed: no note is created
-    try { await onSave(n, ta.value); savedName = n; return true; } catch (e) { alert(`Could not save note: ${e.message || e}`); return false; }
+    try { await onSave(n, ta.value); savedName = n; return true; } catch (e) { uiAlert(`Could not save note: ${e.message || e}`); return false; }
   };
   const save = async () => { if (await commitNote()) close(); };
   const NEW = '\u0000new';
@@ -2250,6 +2317,8 @@ function render() {
   }
   $('#archive').disabled = !state.lines.some((l) => T.parse(l).done);
   $('#browserStorage').style.display = isTauri ? 'none' : '';
+  $('#recentToggle').style.display = isTauri && !isAndroid ? '' : 'none';
+  if (!(isTauri && !isAndroid)) $('#recentList').hidden = true;
   $('#backupZip').style.display = isTauri && !isAndroid && state.path && !isRemote(state.path) ? '' : 'none';   // no save dialog on Android: its backups go to the backup folder when archiving
   $('#backupArchiveToggle').style.display = isTauri ? '' : 'none';
   const vt = $('#viewToggle');
@@ -2554,7 +2623,7 @@ $('#addInput').addEventListener('paste', (e) => {
     onEntries: (items) => addTasks(items),
     onNote: async (first, noteText) => {
       const name = T.nextNoteName(allNoteNames());
-      try { await writeNote(name, noteText); } catch (err) { alert(`Could not save the note: ${err}`); return; }
+      try { await writeNote(name, noteText); } catch (err) { uiAlert(`Could not save the note: ${err}`); return; }
       gitChanged(`${name}.txt`);
       addTasks([{ level: first.level, text: `${first.text} note:${name}` }]);
     },
@@ -2909,18 +2978,26 @@ $('#openFolder').onclick = openFolder;
 $('#moveProjects').onclick = moveDialog;
 $('#openDav').onclick = () => dav.openBrowser();
 $('#open').onclick = isAndroid ? () => openFiles(androidDeps()) : openFile;
-$('#new').onclick = isAndroid ? () => openFiles(androidDeps(), { focusNew: true }) : () => { if (confirmDiscard()) { leaveFolder(); loadText('', 'todo.txt'); } };
+$('#new').onclick = isAndroid ? async () => openFiles(androidDeps(), { focusNew: true }) : async () => { if ((await confirmDiscard())) { leaveFolder(); loadText('', 'todo.txt'); } };
 $('#save').onclick = () => save();
 $('#saveAs').onclick = () => save({ as: true });
 $('#keepFile').style.display = isTauri ? '' : 'none';
 $('#keepFile').onclick = async () => {
-  if (!state.path) return alert('Save the list to a file first.');
+  if (!state.path) return uiAlert('Save the list to a file first.');
   await rememberFile(state.path, true);
   renderFileList();
 };
 $('#archive').onclick = archiveDone;
 $('#browserStorage').onclick = browserStorageDialog;
 $('#backupZip').onclick = backupToZip;
+$('#recentToggle').onclick = () => {
+  const list = $('#recentList');
+  const open = list.hidden;
+  list.hidden = !open;
+  $('#recentToggle').setAttribute('aria-expanded', String(open));
+  $('#recentToggle').querySelector('.sub-caret').className = `fa-solid fa-caret-${open ? 'down' : 'right'} sub-caret`;
+  if (open) renderRecent();
+};
 $('#addKnownFile').onclick = async () => {
   try {
     const p = await tauri.dialog.open({ multiple: false, directory: false, filters: TXT_FILTER });
@@ -2929,7 +3006,7 @@ $('#addKnownFile').onclick = async () => {
     refreshFileInfo(true);
     renderFileList();
     renderKnownFiles();
-  } catch (e) { alert(`Could not add the file: ${e.message || e}`); }
+  } catch (e) { uiAlert(`Could not add the file: ${e.message || e}`); }
 };
 $('#backupArchiveToggle').onclick = async () => {
   const on = !(await invoke('backup_on_archive').catch(() => true));
@@ -3069,9 +3146,9 @@ async function androidCreateFile(path) {
 function androidDeps() {
   const swap = (from, to) => { state.files = state.files.map((f) => (f === from ? to : f)).filter((f, i, a) => a.indexOf(f) === i); saveFiles(); };
   return {
-    invoke, state, confirmDiscard,
+    invoke, state, confirmDiscard, ui: { alert: uiAlert, confirm: uiConfirm },
     switchFile: async (p) => { await switchFile(p); },
-    createFile: async (p) => { if (!confirmDiscard()) return; await androidCreateFile(p); },
+    createFile: async (p) => { if (!(await confirmDiscard())) return; await androidCreateFile(p); },
     onMoved: async (from, to, wasCurrent) => { swap(from, to); if (wasCurrent) { state.dirty = false; await switchFile(to); } },
     onGone: async (path) => {
       state.files = state.files.filter((f) => f !== path);

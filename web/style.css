@@ -497,8 +497,8 @@ body:not(.android).minimal .sidebar { top: auto; max-height: none; }
    the list, so the last entry can be scrolled clear of the bar. */
 body:not(.android).minimal .layout { padding-bottom: 16px; }
 /* the free space only exists while the input bar is visible (mouse near the bottom, or typing): otherwise the list ends at its last entry */
-body:not(.android).minimal #list { padding-bottom: 0; transition: padding-bottom .2s ease; }
-body:not(.android).minimal.show-input #list, body:not(.android).minimal:has(.composer:focus-within) #list, body:not(.android).minimal:has(.composer:hover) #list { padding-bottom: calc(var(--composer-h, 76px) - 8px); }
+body:not(.android).minimal #list > .task:last-child { margin-bottom: 0; transition: margin-bottom .2s ease; }
+body:not(.android).minimal.show-input #list > .task:last-child, body:not(.android).minimal:has(.composer:focus-within) #list > .task:last-child, body:not(.android).minimal:has(.composer:hover) #list > .task:last-child { margin-bottom: calc(var(--composer-h, 76px) - 8px); }
 body:not(.android).minimal .tasks > .task:last-child { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
 
@@ -545,8 +545,8 @@ body.noscrollbars .scroll-area::-webkit-scrollbar { display: none; }
 .set-tabs button[data-tab="about"] { margin-left: auto; }
 #themeMenu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; width: 100%; }
 
-/* minimal mode: the floating input is only as wide as the entries (not under the sidebar, not over the list's scrollbar) */
-body:not(.android).minimal .composer { left: 252px; right: 31px; }
+/* minimal mode: the floating input is exactly as wide as the entries (the list column), like the input bar of the normal mode */
+body:not(.android).minimal .composer { left: 252px; right: 16px; }
 body:not(.android).minimal.nosidebar .composer, body:not(.android).minimal .layout.no-side .composer { left: 16px; }
 @media (max-width: 720px) { body:not(.android).minimal .composer { left: 16px; } }
 
@@ -586,3 +586,18 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
 .kf-enc { color: var(--muted); white-space: nowrap; font-size: 13px; }
 .kf-enc.on { color: var(--ok); }
 .kf-row button { padding: 2px 10px; }
+
+/* in-app message / question dialogs (replace the native alert / confirm boxes) */
+.ui-dialog { z-index: 200; }
+.pw-box .ui-msg { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+
+/* recent files submenu (inside the File menu) */
+.recent-list { display: flex; flex-direction: column; margin: 0 0 4px 14px; padding-left: 8px; border-left: 2px solid var(--line); max-height: 40vh; overflow: auto; }
+.recent-list[hidden] { display: none; }
+.recent-item { display: flex; align-items: center; gap: .4em; border: 0; background: none; text-align: left; padding: 4px 8px; border-radius: 5px; white-space: nowrap; }
+.recent-item:hover { background: var(--hover); }
+.recent-item[aria-current="true"] { font-weight: 600; }
+.recent-item .file-kind { width: 1.1em; text-align: center; color: var(--muted); flex: none; }
+.recent-item small { color: var(--muted); margin-left: auto; padding-left: 12px; }
+.recent-clear { border: 0; background: none; text-align: left; padding: 4px 8px; color: var(--muted); }
+.sub-caret { margin-left: auto; }

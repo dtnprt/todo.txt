@@ -181,6 +181,10 @@ struct Cli {
     #[arg(long, value_name = "on|off")]
     encrypt_file: Option<String>,
 
+    /// List the recent files (the last 20 opened by any client, known or not)
+    #[arg(long)]
+    recent: bool,
+
     /// List the known files (`files=`) with their kind (cloud / git / local) and whether they are encrypted
     #[arg(long)]
     files: bool,
@@ -222,7 +226,7 @@ fn file_kind(p: &std::path::Path) -> (&'static str, Option<bool>) {
 }
 
 fn crypt_switches(cli: &Cli) -> bool {
-    cli.encrypt.is_some() || cli.encrypt_file.is_some() || cli.files || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
+    cli.encrypt.is_some() || cli.encrypt_file.is_some() || cli.files || cli.recent || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
 }
 
 fn parse_on_off(name: &str, v: &str) -> Result<bool, String> {
@@ -310,6 +314,15 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
         }
         crypt::set_session(Some(new));
         println!("password changed ({n} file(s) re-encrypted)");
+    }
+    if cli.recent {
+        for (i, p) in cfg.recent.iter().enumerate() {
+            let (kind, _) = file_kind(p);
+            println!("{:>2}  {kind:<6} {}", i + 1, p.display());
+        }
+        if cfg.recent.is_empty() {
+            println!("no recent files yet");
+        }
     }
     if cli.files {
         let mut all: Vec<PathBuf> = cfg.files.clone();
@@ -592,6 +605,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             cfg.files.push(path.clone()); // known files, for the switcher (todo -F)
         }
         let _ = cfg.save(); // remembering the file is a convenience, never fatal
+    }
+    // the recent files list gets every file that is opened, known or not
+    if !info_only {
+        cfg.push_recent(&path);
+        let _ = cfg.save();
     }
     // `lastfile=` is what the other clients follow: a one-off file (another folder, unknown to them) stays out of it
     if !one_off && cfg.lastfile.as_ref() != Some(&path) {
