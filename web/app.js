@@ -1,4 +1,5 @@
 import * as T from './todotxt.js';
+import { pasteLines, openPastePanel } from './paste.js';
 import { createComposer, attachHighlight, attachNoteHighlight, attachNoteTrigger, deleteWord, checkpoint, wordAt, dateAssist, replaceWordAt } from './composer.js';
 import { buildCalendar, parseIsoDate } from './calendar.js';
 import { createWebdav, isRemote, serverFor, davParent, davJoin, davName } from './webdav.js';
@@ -211,6 +212,19 @@ function addTask(text) {
   line = T.withLevel(line, T.levelOf(state.lines[p]) + 1);
   const at = T.subtreeEnd(state.lines, p) + 1;
   commit([...state.lines.slice(0, at), line, ...state.lines.slice(at)]);
+}
+/** Add several entries at once ({level, text}), as one undo step: at the end, or below the selected parent (one level deeper). */
+function addTasks(items) {
+  const min = Math.min(...items.map((it) => it.level));
+  const p = parentIndex();
+  const base = p < 0 ? 0 : Math.min(T.MAX_LEVEL, T.levelOf(state.lines[p]) + 1);
+  const made = items.map((it) => {
+    const line = T.withCreationDate(T.normalizeDue(T.fixPriorityCase(it.text)));
+    return T.withLevel(line, p < 0 ? it.level : Math.min(T.MAX_LEVEL, base + it.level - min));
+  });
+  if (p < 0) return commit([...state.lines, ...made]);
+  const at = T.subtreeEnd(state.lines, p) + 1;
+  commit([...state.lines.slice(0, at), ...made, ...state.lines.slice(at)]);
 }
 const removeLine = (i) => {
   const gone = state.lines[i];
@@ -1940,6 +1954,26 @@ const composer = createComposer({
   calendarEnabled: () => state.calendar,
   onNote: (inp) => noteForInput(inp),
   onSearch: (q) => { state.filter.q = q; render(); },
+});
+
+// Pasting several lines into the add bar opens the paste panel (each line an entry / first line + note / sub-entries).
+$('#addInput').addEventListener('paste', (e) => {
+  if (composer.mode !== 'add') return;
+  const lines = pasteLines(e.clipboardData?.getData('text') || '');
+  if (lines.length < 2) return;
+  e.preventDefault();
+  openPastePanel({
+    host: document.querySelector('#addForm .composer-box'),
+    lines,
+    onEntries: (items) => addTasks(items),
+    onNote: async (first, noteText) => {
+      const name = T.nextNoteName(allNoteNames());
+      try { await writeNote(name, noteText); } catch (err) { alert(`Could not save the note: ${err}`); return; }
+      gitChanged(`${name}.txt`);
+      addTasks([{ level: first.level, text: `${first.text} note:${name}` }]);
+    },
+    onClose: () => $('#addInput').focus(),
+  });
 });
 
 // ---------- priority popup (touch toolbar button and the priority button of each task) ----------

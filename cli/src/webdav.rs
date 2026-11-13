@@ -6,6 +6,8 @@
 //! Any file path that starts with `http://` or `https://` is a remote file on such a server (the server whose
 //! URL is a prefix of it). Reading is `GET`, writing `PUT` guarded by `If-Match: <etag>` (a change made
 //! meanwhile by someone else gives an error instead of being overwritten), listing is `PROPFIND`.
+// included by both the CLI and the desktop app, each uses only part of it
+#![allow(dead_code)]
 
 use std::io::Read;
 use std::time::Duration;

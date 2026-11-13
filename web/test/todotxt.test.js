@@ -151,3 +151,16 @@ test('selectForMove takes the sub-tree of every match', () => {
   assert.deepEqual(T.selectForMove(L, []), []);
   assert.ok(T.matchesTerms('(A) call +Home @x', ['+home', '@X', '(a)', 'CALL']));
 });
+
+test('paste: classify and build entries', async () => {
+  const P = await import('../paste.js');
+  assert.deepEqual(P.pasteLines('a\r\n\r\n b  \n'), ['a', ' b']);
+  assert.equal(P.classify(['one']), 'single');
+  assert.equal(P.classify(['milk', 'eggs']), 'plain');
+  assert.equal(P.classify(['(A) 2026-01-01 a', '2026-01-02 b', 'x 2026-01-03 c']), 'entries');
+  assert.equal(P.classify(['(A) 2026-01-01 a', '- b', '-- c']), 'tree');
+  assert.deepEqual(P.entryItems(['(A) a', '- b', '-- c']).map((i) => i.level), [0, 1, 2]);
+  assert.equal(P.entryItems(['-- c'])[0].text, 'c');
+  assert.equal(P.entryItems(['(B) 2026-01-01 -- c'])[0].text, '(B) 2026-01-01 c');
+  assert.deepEqual(P.noteSplit(['t', 'n1', ' n2']), { first: { level: 0, text: 't' }, note: 'n1\n n2\n' });
+});

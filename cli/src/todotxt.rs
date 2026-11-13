@@ -129,6 +129,7 @@ fn is_date_shape(w: &str) -> bool {
 }
 
 /// First word and the rest, split at a single space (the format's separator).
+#[allow(dead_code)]
 fn split_word(s: &str) -> Option<(&str, &str)> {
     let (w, r) = s.split_once(' ')?;
     if w.is_empty() || w.contains(char::is_whitespace) {

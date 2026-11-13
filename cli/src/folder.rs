@@ -166,6 +166,7 @@ pub fn note_name(t: &crate::todotxt::Task) -> Option<String> {
 }
 
 /// File-name-safe short name from a task description (projects, contexts and key:value words dropped).
+#[allow(dead_code)]
 pub fn slugify(text: &str) -> String {
     let mut out = String::new();
     for w in text.split_whitespace() {

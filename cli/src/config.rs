@@ -126,6 +126,7 @@ impl Config {
     }
 
     /// Remember `path` in the list of known files (and as the current one).
+#[allow(dead_code)]
     pub fn remember(&mut self, path: &std::path::Path) {
         self.file = Some(path.to_path_buf());
         if !self.files.iter().any(|f| f == path) {
@@ -191,6 +192,7 @@ fn parse_json_strings(v: &str) -> Vec<String> {
 }
 
 /// Create the config file if it does not exist yet, so that it can be shown or opened.
+#[allow(dead_code)]
 pub fn ensure_exists() -> std::io::Result<PathBuf> {
     let path = config_path();
     if !path.exists() {
@@ -200,6 +202,7 @@ pub fn ensure_exists() -> std::io::Result<PathBuf> {
 }
 
 /// Open `path` in the default editor / associated program of the platform.
+#[allow(dead_code)]
 pub fn open_in_editor(path: &std::path::Path) -> std::io::Result<()> {
     use std::process::Command;
     let status = if cfg!(windows) {

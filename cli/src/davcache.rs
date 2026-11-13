@@ -19,6 +19,8 @@
 //! (`webdav::etag`, every `POLL`) and refreshes the cache when it changed. The "version" handed to the
 //! clients is a local *token* (`token.txt`) that only changes when the content really changed from outside
 //! (own pushes keep it), so their change check is a cheap file read and a change shows up within a second.
+// included by both the CLI and the desktop app, each uses only part of it
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;

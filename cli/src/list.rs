@@ -201,6 +201,7 @@ where
 }
 
 /// Lines removed from / added to a list between two versions (order-independent).
+#[allow(unused_imports)]
 pub use crate::davcache::{line_diff, reordered};
 
 #[cfg(test)]
