@@ -1,5 +1,6 @@
 import * as T from './todotxt.js';
 import { pasteLines, openPastePanel } from './paste.js';
+import * as C from './crypt.js';
 import { createComposer, attachHighlight, attachNoteHighlight, attachNoteTrigger, deleteWord, checkpoint, wordAt, dateAssist, replaceWordAt } from './composer.js';
 import { buildCalendar, parseIsoDate } from './calendar.js';
 import { createWebdav, isRemote, serverFor, davParent, davJoin, davName } from './webdav.js';
@@ -249,18 +250,18 @@ async function readAny(p) {
   if (isRemote(p)) {
     const entry = davEntry(p);
     if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
-    return invoke('webdav_get', { entry, url: p });
+    return withUnlock(() => invoke('webdav_get', { entry, url: p }));
   }
-  return { text: await tauri.fs.readTextFile(p), etag: null, missing: false };
+  return { text: await readLocal(p), etag: null, missing: false };
 }
 /** Write a local or WebDAV file; for WebDAV the new ETag is remembered. */
 async function writeAny(p, text) {
-  if (!isRemote(p)) return tauri.fs.writeTextFile(p, text);
+  if (!isRemote(p)) return writeLocal(p, text);
   const entry = davEntry(p);
   if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
   let r;
   try {
-    r = await invoke('webdav_put', { entry, url: p, text, etag: davEtag });
+    r = await withUnlock(() => invoke('webdav_put', { entry, url: p, text, etag: davEtag }));
   } catch (e) {
     if (!String(e).startsWith('conflict:')) throw e;
     if (!confirm('The file was changed on the server meanwhile.\nOverwrite it with your version? (Cancel keeps the server version; use File → Reload from disk to load it.)')) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
@@ -305,6 +306,234 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   persist();
   render();
 }
+
+
+// ---------- encryption (desktop; Rust side: cli/src/crypt.rs) ----------
+// Lists, notes and the WebDAV cache can be stored encrypted (AES-256-GCM). Reads that find an encrypted file ask for the
+// password (or use the keyring / Windows Hello) and retry; polling reads never ask.
+const isLockErr = (e) => /password required|wrong password/.test(String((e && e.message) || e));
+let pwDialog = null;
+let rememberAfter = false;
+
+/** Password dialog -> {password, remember, useStored} | null. `confirm`: ask twice (new password). */
+function askPassword({ title, message, confirm = false }) {
+  if (pwDialog) return pwDialog;
+  pwDialog = (async () => {
+    let st = { stored: false, hello: false };
+    try { st = await invoke('crypt_status'); } catch { /* defaults */ }
+    return new Promise((resolve) => {
+      const pw = el('input', { type: 'password', autocomplete: 'off', spellcheck: false, 'aria-label': 'Password' });
+      const pw2 = confirm ? el('input', { type: 'password', autocomplete: 'off', spellcheck: false, placeholder: 'Repeat the password', 'aria-label': 'Repeat the password' }) : null;
+      const remember = el('input', { type: 'checkbox', checked: true });
+      const err = el('div', { className: 'pw-err' });
+      const done = (v) => { document.removeEventListener('keydown', onKey, true); ov.remove(); pwDialog = null; resolve(v); };
+      const submit = () => {
+        if (!pw.value) { err.textContent = 'Enter the password.'; pw.focus(); return; }
+        if (pw2 && pw2.value !== pw.value) { err.textContent = 'The passwords differ.'; pw2.focus(); return; }
+        done({ password: pw.value, remember: remember.checked, useStored: false });
+      };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+        else if (e.key === 'Enter' && ov.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && document.activeElement.type === 'password') { e.preventDefault(); submit(); }
+      };
+      const buttons = [el('button', { type: 'button', className: 'primary', textContent: confirm ? 'Set password' : 'Unlock', onclick: submit })];
+      if (!confirm && st.stored) buttons.push(el('button', { type: 'button', textContent: st.hello ? 'Use Windows Hello' : 'Use stored password', onclick: () => done({ useStored: true }) }));
+      buttons.push(el('button', { type: 'button', textContent: 'Cancel', onclick: () => done(null) }));
+      const ov = el('div', { className: 'help', onmousedown: (e) => { if (e.target === ov) done(null); } },
+        el('div', { className: 'help-box pw-box', role: 'dialog', 'aria-label': title },
+          el('h2', { textContent: title }),
+          el('p', { textContent: message }),
+          pw, ...(pw2 ? [pw2] : []),
+          ...(isTauri ? [el('label', {}, remember, document.createTextNode('Keep the password in the system keyring'))] : []),
+          err,
+          el('div', { className: 'pw-actions' }, ...buttons)));
+      document.addEventListener('keydown', onKey, true);
+      document.body.append(ov);
+      pw.focus();
+    });
+  })();
+  return pwDialog;
+}
+
+/** Run `fn`; when it fails because a password is needed, ask for it (dialog, keyring or Windows Hello) and run it again. */
+async function withUnlock(fn, interactive = true) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const r = await fn();
+      if (rememberAfter) { rememberAfter = false; invoke('crypt_remember').catch((e) => console.warn('Could not store the password:', e)); }
+      return r;
+    } catch (e) {
+      if (!isLockErr(e) || !interactive || attempt >= 5) throw e;
+      const wrong = /wrong password/.test(String((e && e.message) || e));
+      const a = await askPassword({ title: 'Encrypted files', message: wrong ? 'That password does not fit. Try again.' : 'These files are encrypted. Enter the password to open them.' });
+      if (!a) throw e;
+      try {
+        await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+        rememberAfter = !!a.remember && !a.useStored;
+      } catch (ue) { if (!isLockErr(ue)) throw ue; }
+    }
+  }
+}
+const readLocal = (p, interactive = true) => withUnlock(() => invoke('read_text', { path: p }), interactive);
+const writeLocal = (p, text) => withUnlock(() => invoke('write_text', { path: p, text }));
+
+
+// Browser (no Rust): the same file format through WebCrypto (web/crypt.js). The password stays in memory only.
+let webEncrypt = false;   // write encrypted? (set by opening an encrypted file, or by Settings -> Security)
+try { webEncrypt = localStorage.getItem('todotxt.encrypt') === '1'; } catch { /* storage unavailable */ }
+const setWebEncrypt = (on) => { webEncrypt = on; try { localStorage.setItem('todotxt.encrypt', on ? '1' : '0'); } catch { /* ignore */ } };
+
+/** Text of a file read in the browser: decrypted when it is encrypted. interactive=false: no dialog (null when locked). */
+async function webDecode(text, interactive = true) {
+  if (isTauri || !C.isEncrypted(text)) return text;
+  for (let i = 0; ; i++) {
+    if (!C.hasSession()) {
+      if (!interactive) return null;
+      const a = await askPassword({ title: 'Encrypted file', message: i ? 'That password does not fit. Try again.' : 'This file is encrypted. Enter the password to open it.' });
+      if (!a) throw new Error('password required: cancelled');
+      C.setSession(a.password);
+    }
+    try {
+      const plain = await C.open(text, C.getSession());
+      if (!webEncrypt) setWebEncrypt(true);   // an encrypted file stays encrypted when it is saved
+      return plain;
+    } catch (e) {
+      if (!/wrong password/.test(e.message)) throw e;
+      C.setSession(null);
+      if (!interactive) return null;
+    }
+  }
+}
+
+/** Text to write in the browser: encrypted when switched on. */
+async function webEncode(text) {
+  if (isTauri || !webEncrypt) return text;
+  if (!C.hasSession()) {
+    const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password for the encrypted file. There is no way to recover it.', confirm: true });
+    if (!a) throw new Error('not saved: no password');
+    C.setSession(a.password);
+  }
+  return C.seal(text, C.getSession());
+}
+
+/** Files that are converted when encryption is switched on/off or the password changes (local only). */
+function cryptTargets() {
+  const folder = state.folder && !isRemote(state.folder) ? state.folder : null;
+  const files = [];
+  if (!folder && state.path && !isRemote(state.path)) files.push(state.path, state.path.replace(/[^/\\]*$/, '') + 'done.txt');
+  return { folder, files };
+}
+
+async function refreshSecurity() {
+  if (!isTauri) {   // browser: only what WebCrypto can do (no keyring, no Windows Hello)
+    $('#encToggle').setAttribute('aria-checked', String(webEncrypt));
+    for (const id of ['#encStore', '#encHello']) $(id).style.display = 'none';
+    $('#encLock').disabled = !C.hasSession();
+    $('#encStatus').textContent = `${webEncrypt ? 'Files are saved encrypted' : 'Files are saved as plain text'} · password ${C.hasSession() ? 'known in this session' : 'not entered yet'} · the browser keeps no password: you are asked again after a reload`;
+    return;
+  }
+  const set = (id, on) => $(id).setAttribute('aria-checked', String(!!on));
+  let st;
+  try { st = await invoke('crypt_status'); } catch { return; }
+  set('#encToggle', st.enabled);
+  set('#encStore', st.stored);
+  set('#encHello', st.hello);
+  $('#encHello').disabled = !st.hello_available;
+  $('#encHello').title = st.hello_available ? '' : 'Windows Hello is not available on this computer';
+  $('#encStore').disabled = !st.unlocked && !st.stored;
+  $('#encLock').disabled = !st.unlocked;
+  $('#encStatus').textContent = `${st.enabled ? 'Encryption is on' : 'Encryption is off'} · password ${st.unlocked ? 'known in this session' : 'locked'} · keyring: ${st.stored ? 'stored' : 'not stored'} · Windows Hello: ${st.hello_available ? (st.hello ? 'on' : 'available') : 'not available'}`;
+  return st;
+}
+
+async function setEncryption(on) {
+  if (!isTauri) {
+    setWebEncrypt(on);
+    if (on && !C.hasSession()) {
+      const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password for the encrypted files. There is no way to recover it.', confirm: true });
+      if (!a) { setWebEncrypt(false); return refreshSecurity(); }
+      C.setSession(a.password);
+    }
+    if (on && !C.hasSession()) return refreshSecurity();
+    if (state.handle) { state.dirty = true; await save(); }   // write the open file in the new form
+    return refreshSecurity();
+  }
+  let st = await invoke('crypt_status');
+  try {
+    if (on) {
+      if (!st.unlocked) {
+        const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password. You need it to open the files on every computer; there is no way to recover it.', confirm: true });
+        if (!a) return;
+        await invoke('crypt_unlock', { password: a.password });
+        if (a.remember) await invoke('crypt_remember');
+      }
+    } else if (!st.unlocked) {
+      const a = await askPassword({ title: 'Decrypt files', message: 'Enter the password to decrypt your files.' });
+      if (!a) return;
+      await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+    }
+    await invoke('crypt_set_enabled', { on });
+    await setCfgNow('encrypt', on);
+    const t = cryptTargets();
+    const n = await invoke('crypt_convert', { folder: t.folder, files: t.files, encrypt: on, newPassword: null });
+    // a WebDAV list is not converted on disk: write it again so it is stored in the new form
+    if (state.path && isRemote(state.path)) { state.dirty = true; await save(); }
+    alert(on ? `Encryption is on. ${n} local file(s) encrypted.` : `Encryption is off. ${n} local file(s) decrypted.`);
+  } catch (e) {
+    await invoke('crypt_set_enabled', { on: !on }).catch(() => {});
+    await setCfgNow('encrypt', !on);
+    alert(`Could not ${on ? 'encrypt' : 'decrypt'}: ${e}`);
+  }
+  refreshSecurity();
+}
+
+async function changePassword() {
+  if (!isTauri) {
+    const a = await askPassword({ title: 'Set password', message: 'The new password is used for the next save.', confirm: true });
+    if (!a) return;
+    C.setSession(a.password);
+    if (webEncrypt && state.handle) { state.dirty = true; await save(); }
+    return refreshSecurity();
+  }
+  const st = await invoke('crypt_status');
+  try {
+    if (st.enabled && !st.unlocked) {
+      const a = await askPassword({ title: 'Current password', message: 'Enter the current password first.' });
+      if (!a) return;
+      await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+    }
+    const a = await askPassword({ title: st.enabled ? 'Change password' : 'Set password', message: st.enabled ? 'All encrypted local files are re-encrypted with the new password.' : 'The password is used as soon as encryption is switched on.', confirm: true });
+    if (!a) return;
+    if (st.enabled) {
+      const t = cryptTargets();
+      const n = await invoke('crypt_convert', { folder: t.folder, files: t.files, encrypt: true, newPassword: a.password });
+      if (state.path && isRemote(state.path)) { state.dirty = true; await save(); }
+      alert(`Password changed. ${n} local file(s) re-encrypted.`);
+    } else {
+      await invoke('crypt_unlock', { password: a.password });
+    }
+    if (a.remember) await invoke('crypt_remember');
+  } catch (e) { alert(`Could not change the password: ${e}`); }
+  refreshSecurity();
+}
+
+$('#encToggle').onclick = async () => { if (!isTauri) return setEncryption(!webEncrypt); const st = await invoke('crypt_status'); await setEncryption(!st.enabled); };
+$('#encPassword').onclick = changePassword;
+$('#encStore').onclick = async () => {
+  try {
+    const st = await invoke('crypt_status');
+    if (st.stored) await invoke('crypt_forget'); else await invoke('crypt_remember');
+  } catch (e) { alert(String(e)); }
+  refreshSecurity();
+};
+$('#encHello').onclick = async () => {
+  const st = await invoke('crypt_status');
+  if (!st.hello_available) return;
+  if (!st.hello && !(await invoke('crypt_verify').catch(() => false))) { alert('Windows Hello did not confirm. The setting stays off.'); return; }
+  await setCfgNow('encrypt_hello', !st.hello);
+  refreshSecurity();
+};
+$('#encLock').onclick = async () => { if (isTauri) await invoke('crypt_lock'); else C.setSession(null); refreshSecurity(); };
 
 // ---------- file I/O ----------
 
@@ -436,7 +665,9 @@ async function listFolder() {
       const found = [];
       for await (const [name, h] of state.dirHandle.entries()) {
         if (h.kind === 'file' && /\.txt$/i.test(name) && !name.startsWith('.')) {
-          found.push({ name, text: await (await h.getFile()).text() });
+          let t = await (await h.getFile()).text();
+          if (C.isEncrypted(t) && C.hasSession()) t = (await webDecode(t, false)) ?? t;   // quietly: only for the note references
+          found.push({ name, text: t });
         }
       }
       const refs = new Set();
@@ -469,7 +700,7 @@ async function openInFolder(name) {
     setCfg('file', p);
   } else {
     const h = await state.dirHandle.getFileHandle(name, { create: true });
-    loadText(await (await h.getFile()).text(), name, h);
+    loadText(await webDecode(await (await h.getFile()).text()), name, h);
   }
 }
 
@@ -521,7 +752,7 @@ async function openFile() {
       const p = await tauri.dialog.open({ multiple: false, directory: false, filters: TXT_FILTER });
       if (!p) return;
       leaveFolder();
-      loadText(await tauri.fs.readTextFile(p), baseName(p), null, p);
+      loadText(await readLocal(p), baseName(p), null, p);
       rememberFile(p);
     } else if (hasFSA) {
       const [handle] = await window.showOpenFilePicker({
@@ -529,7 +760,7 @@ async function openFile() {
       });
       const file = await handle.getFile();
       leaveFolder();
-      loadText(await file.text(), file.name, handle);
+      loadText(await webDecode(await file.text()), file.name, handle);
     } else {
       $('#fileInput').click();
     }
@@ -541,7 +772,7 @@ async function openFile() {
 async function openFromFileObject(file) {
   if (!confirmDiscard()) return;
   leaveFolder();
-  loadText(await file.text(), file.name);
+  loadText(await webDecode(await file.text()), file.name);
 }
 
 /** Save text under a user-chosen name. Resolves to false if the user cancelled. */
@@ -549,18 +780,18 @@ async function download(name, text) {
   if (isAndroid && state.path && !isRemote(state.path)) {
     const p = state.path.replace(/[^/\\]*$/, '') + name;   // done.txt next to the list (appended)
     let old = '';
-    try { old = await tauri.fs.readTextFile(p); } catch { /* new file */ }
-    await tauri.fs.writeTextFile(p, old + text);
+    try { old = await readLocal(p); } catch { /* new file */ }
+    await writeLocal(p, old + text);
     return true;
   }
   if (isTauri) {
     const p = await tauri.dialog.save({ defaultPath: name, filters: TXT_FILTER });
     if (!p) return false;
-    await tauri.fs.writeTextFile(p, text);
+    await writeLocal(p, text);
     return true;
   }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  a.href = URL.createObjectURL(new Blob([await webEncode(text)], { type: 'text/plain;charset=utf-8' }));
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -592,8 +823,9 @@ async function save({ as = false } = {}) {
         });
         state.fileName = state.handle.name;
       }
+      const out = await webEncode(text);
       const w = await state.handle.createWritable();
-      await w.write(text);
+      await w.write(out);
       await w.close();
     } else {
       await download(state.fileName, text);
@@ -661,11 +893,11 @@ async function readForMove(p) {
   }
   let exists = true;
   try { if (tauri.fs.exists) exists = await tauri.fs.exists(p); } catch { /* assume it exists */ }
-  return { text: exists ? await tauri.fs.readTextFile(p) : '', etag: null };
+  return { text: exists ? await readLocal(p) : '', etag: null };
 }
 async function writeForMove(p, text, r) {
   if (isRemote(p)) await invoke('webdav_put', { entry: r.entry, url: p, text, etag: r.etag });
-  else await tauri.fs.writeTextFile(p, text);
+  else await writeLocal(p, text);
 }
 
 function moveDialog() {
@@ -773,9 +1005,9 @@ async function readCurrent() {
       davEtag = r.etag;
       return r.text;
     }
-    return tauri.fs.readTextFile(state.path);
+    return readLocal(state.path, false).catch((e) => { if (isLockErr(e)) return null; throw e; });   // polling never asks for the password
   }
-  if (state.handle) return (await state.handle.getFile()).text();
+  if (state.handle) return webDecode(await (await state.handle.getFile()).text(), false);   // polling never asks
   return null;
 }
 async function checkExternalChange(manual = false) {
@@ -1110,24 +1342,24 @@ const noteUrl = (name) => davJoin(davParent(state.path) + 'notes/', `${name}.txt
 
 async function readNote(name) {
   try {
-    if (onDav()) return (await invoke('webdav_get', { entry: davEntry(state.path), url: noteUrl(name) })).text;
-    if (isTauri) return await invoke('read_note', { folder: state.folder, name });
-    if (state.dirHandle) return await (await (await (await state.dirHandle.getDirectoryHandle('notes')).getFileHandle(`${name}.txt`)).getFile()).text();
-    return localStorage.getItem(NOTE_KEY + name) || '';
-  } catch { return ''; }
+    if (onDav()) return (await withUnlock(() => invoke('webdav_get', { entry: davEntry(state.path), url: noteUrl(name) }))).text;
+    if (isTauri) return await withUnlock(() => invoke('read_note', { folder: state.folder, name }));
+    if (state.dirHandle) return await webDecode(await (await (await (await state.dirHandle.getDirectoryHandle('notes')).getFileHandle(`${name}.txt`)).getFile()).text());
+    return await webDecode(localStorage.getItem(NOTE_KEY + name) || '');
+  } catch (e) { if (isLockErr(e)) throw e; return ''; }
 }
 
 async function writeNote(name, text) {
-  if (onDav()) return invoke('webdav_put', { entry: davEntry(state.path), url: noteUrl(name), text, etag: null });
-  if (isTauri) return invoke('write_note', { folder: state.folder, name, text });
+  if (onDav()) return withUnlock(() => invoke('webdav_put', { entry: davEntry(state.path), url: noteUrl(name), text, etag: null }));
+  if (isTauri) return withUnlock(() => invoke('write_note', { folder: state.folder, name, text }));
   if (state.dirHandle) {
     const dir = await state.dirHandle.getDirectoryHandle('notes', { create: true });
     const h = await dir.getFileHandle(`${name}.txt`, { create: true });
     const w = await h.createWritable();
-    await w.write(text);
+    await w.write(await webEncode(text));
     return w.close();
   }
-  localStorage.setItem(NOTE_KEY + name, text);
+  localStorage.setItem(NOTE_KEY + name, await webEncode(text));
 }
 
 async function deleteNoteFile(name) {
@@ -1659,6 +1891,7 @@ function render() {
   $('#openDav').style.display = isTauri ? '' : 'none';
   $('#moveProjects').style.display = isTauri ? '' : 'none';
   $('#davTab').style.display = isTauri ? '' : 'none';
+  $('#secTab').style.display = isAndroid ? 'none' : '';
   renderGit();
   $('#autoSaveToggle').style.display = isTauri ? '' : 'none';
   $('#autoSaveToggle').setAttribute('aria-checked', state.autoSave);
@@ -2147,6 +2380,7 @@ document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input, 
 const settingsEl = $('#settings');
 function showTab(name) {
   if (name === 'webdav') dav.renderPane(settingsEl.querySelector('[data-pane=webdav]'));
+  if (name === 'security') refreshSecurity();
   settingsEl.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   settingsEl.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== name; });
 }

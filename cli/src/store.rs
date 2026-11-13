@@ -6,7 +6,44 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use std::io::IsTerminal;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::webdav;
+
+/// May a read or write ask for the password on the terminal? True for the one-shot CLI and for the start of the TUI
+/// (before the screen is taken over), false while the TUI runs.
+static CAN_PROMPT: AtomicBool = AtomicBool::new(false);
+
+pub fn allow_prompt(on: bool) {
+    CAN_PROMPT.store(on, Ordering::Relaxed);
+}
+
+/// Ask for the password (no echo). None when there is no terminal to ask on.
+pub fn prompt_password(message: &str) -> Option<String> {
+    if !io::stdin().is_terminal() {
+        return None;
+    }
+    rpassword::prompt_password(message).ok().filter(|p| !p.is_empty())
+}
+
+/// Run `f`; if it fails because a password is needed, ask for it (up to three times) and try again.
+pub fn with_unlock<T>(f: impl Fn() -> io::Result<T>) -> io::Result<T> {
+    let mut attempts = 0;
+    loop {
+        match f() {
+            Err(e) if crate::crypt::is_lock_error(&e) && CAN_PROMPT.load(Ordering::Relaxed) && attempts < 3 => {
+                attempts += 1;
+                let msg = if attempts == 1 { "Password for the encrypted todo files: " } else { "Wrong password, try again: " };
+                match prompt_password(msg) {
+                    Some(p) => crate::crypt::set_session(Some(p)),
+                    None => return Err(e),
+                }
+            }
+            other => return other,
+        }
+    }
+}
 
 pub struct Store {
     pub lines: Vec<String>,
@@ -32,12 +69,17 @@ fn other(e: webdav::Error) -> io::Error {
 
 /// Text of a local or remote file (plus the ETag for remote ones). A missing file is `ErrorKind::NotFound`.
 pub fn read_text(path: &Path) -> io::Result<(String, Option<String>)> {
+    with_unlock(|| read_text_once(path))
+}
+
+fn read_text_once(path: &Path) -> io::Result<(String, Option<String>)> {
     if webdav::is_remote(&path.to_string_lossy()) {
         let server = server_of(path)?;
         // through the offline cache: unreachable server -> cached / pending local version
         crate::davcache::get(&server, &path.to_string_lossy()).map(|g| (g.text, g.etag)).map_err(other)
     } else {
-        fs::read_to_string(path).map(|t| (t, None))
+        let t = fs::read_to_string(path)?;
+        crate::crypt::open(&t).map(|t| (t, None)).map_err(io::Error::from)
     }
 }
 
@@ -56,6 +98,10 @@ impl Store {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
+        with_unlock(|| self.save_once(path))
+    }
+
+    fn save_once(&self, path: &Path) -> io::Result<()> {
         if webdav::is_remote(&path.to_string_lossy()) {
             let server = server_of(path)?;
             let r = crate::davcache::put(&server, &path.to_string_lossy(), &self.text(), self.etag.borrow().as_deref()).map_err(other)?;
@@ -91,7 +137,7 @@ pub fn render(lines: &[String], crlf: bool) -> String {
 }
 
 pub fn save_lines(path: &Path, lines: &[String], crlf: bool) -> io::Result<()> {
-    let out = render(lines, crlf);
+    let out = crate::crypt::seal_for_path(path, &render(lines, crlf)).map_err(io::Error::from)?;
     if let Some(dir) = path.parent() {
         if !dir.as_os_str().is_empty() {
             fs::create_dir_all(dir)?;

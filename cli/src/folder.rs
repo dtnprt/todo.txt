@@ -97,7 +97,7 @@ pub fn list_txt_files(dir: &Path) -> Vec<PathBuf> {
             if !meta.is_file() || is_hidden(&name, &meta) || !is_txt(&name) {
                 continue;
             }
-            let text = fs::read_to_string(entry.path()).unwrap_or_default();
+            let text = crate::crypt::open_quiet(&fs::read_to_string(entry.path()).unwrap_or_default());
             files.push((entry.path(), text));
         }
     }
@@ -236,10 +236,31 @@ pub struct NoteFile {
     remote: Option<(crate::webdav::Server, String)>,
 }
 
+impl NoteFile {
+    /// The note text (a local note may be encrypted; the temporary copy of a remote note is plain).
+    pub fn read(&self) -> String {
+        crate::crypt::open(&fs::read_to_string(&self.local).unwrap_or_default()).unwrap_or_default()
+    }
+
+    /// Write the note text: encrypted when encryption is on (not the temporary copy of a remote note: the upload encrypts).
+    pub fn write(&self, text: &str) -> std::io::Result<()> {
+        if self.remote.is_some() {
+            return fs::write(&self.local, text);
+        }
+        fs::write(&self.local, crate::crypt::seal_for_path(&self.local, text).map_err(std::io::Error::from)?)
+    }
+}
+
 pub fn prepare_note(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::Result<NoteFile> {
     let t = todo.to_string_lossy().into_owned();
     if !crate::webdav::is_remote(&t) {
-        return Ok(NoteFile { local: ensure_note_file(folder, name)?, remote: None });
+        let nf = NoteFile { local: ensure_note_file(folder, name)?, remote: None };
+        // an encrypted note that cannot be decrypted must not be opened (saving would overwrite it)
+        let raw = fs::read_to_string(&nf.local).unwrap_or_default();
+        if crate::crypt::is_encrypted(&raw) {
+            crate::crypt::open(&raw)?;
+        }
+        return Ok(nf);
     }
     let server = crate::store::server_of(todo)?;
     let url = crate::webdav::join(&format!("{}notes/", crate::webdav::parent(&t)), &format!("{name}.txt"));
@@ -257,7 +278,7 @@ pub fn prepare_note(todo: &Path, folder: Option<&Path>, name: &str) -> std::io::
 
 /// After editing: upload a remote note (an empty one is deleted), remove the temporary file or an empty local note.
 pub fn finish_note(n: &NoteFile) -> std::io::Result<()> {
-    let text = fs::read_to_string(&n.local).unwrap_or_default();
+    let text = n.read();
     let err = |e: crate::webdav::Error| std::io::Error::new(std::io::ErrorKind::Other, e.to_string());
     match &n.remote {
         Some((server, url)) => {
@@ -279,7 +300,7 @@ pub fn finish_note(n: &NoteFile) -> std::io::Result<()> {
 
 /// True if the note file (after editing) has any text.
 pub fn note_nonempty(n: &NoteFile) -> bool {
-    fs::read_to_string(&n.local).map(|t| !t.trim().is_empty()).unwrap_or(false)
+    !n.read().trim().is_empty()
 }
 
 /// Default name for a note typed into a text that is not in `lines` yet.
@@ -308,9 +329,9 @@ pub fn note_via_editor(todo: &Path, folder: Option<&Path>, name: &str) -> std::i
 
 /// Run the inline multi-line input on the note file (cancel keeps the old content).
 pub fn edit_note_inline(n: &NoteFile, name: &str) -> std::io::Result<()> {
-    let cur = fs::read_to_string(&n.local).unwrap_or_default();
+    let cur = n.read();
     if let Some(t) = crate::textarea::run_inline(&format!("note:{name}"), &cur)? {
-        fs::write(&n.local, t)?;
+        n.write(&t)?;
     }
     Ok(())
 }

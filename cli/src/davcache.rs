@@ -91,13 +91,27 @@ fn dir(url: &str) -> PathBuf {
     home().join(".todo.txt").join("cache").join("webdav").join(format!("{h:016x}"))
 }
 
+/// The text files of the cache hold the todo list itself: they are encrypted too when encryption is on.
+fn is_content(name: &str) -> bool {
+    matches!(name, "base.txt" | "local.txt")
+}
+
 fn read(d: &std::path::Path, name: &str) -> Option<String> {
-    fs::read_to_string(d.join(name)).ok()
+    let t = fs::read_to_string(d.join(name)).ok()?;
+    if is_content(name) { crate::crypt::open_session(&t) } else { Some(t) }
 }
 
 fn write(d: &std::path::Path, name: &str, text: &str) {
     let _ = fs::create_dir_all(d);
-    let _ = fs::write(d.join(name), text);
+    if is_content(name) {
+        // encryption on but locked: no plain-text copy is written (the older cache file stays)
+        match crate::crypt::seal_session_if_enabled(text) {
+            Some(t) => { let _ = fs::write(d.join(name), t); }
+            None => {}
+        }
+    } else {
+        let _ = fs::write(d.join(name), text);
+    }
 }
 
 fn store_base(d: &std::path::Path, url: &str, text: &str, etag: Option<&str>) {

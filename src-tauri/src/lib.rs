@@ -10,6 +10,9 @@ mod git;
 // WebDAV storage + keyring credentials: the same code as the terminal app
 #[path = "../../cli/src/webdav.rs"]
 mod webdav;
+// optional AES-256-GCM encryption of lists, notes and the WebDAV cache: the same code as the terminal app
+#[path = "../../cli/src/crypt.rs"]
+mod crypt;
 // offline cache for WebDAV files (pending changes are synced when the server is back)
 #[path = "../../cli/src/davcache.rs"]
 mod davcache;
@@ -74,7 +77,7 @@ fn list_txt_files(dir: String) -> Result<Vec<String>, String> {
         if !meta.is_file() || is_hidden(&name, &meta) || !name.to_lowercase().ends_with(".txt") {
             continue;
         }
-        let text = fs::read_to_string(entry.path()).unwrap_or_default();
+        let text = crypt::open_quiet(&fs::read_to_string(entry.path()).unwrap_or_default());
         files.push((name, text));
     }
     let mut refs = HashSet::new();
@@ -109,7 +112,7 @@ fn note_path(folder: &Option<String>, name: &str) -> Result<PathBuf, String> {
 fn read_note(folder: Option<String>, name: String) -> Result<String, String> {
     let p = note_path(&folder, &name)?;
     match fs::read_to_string(&p) {
-        Ok(t) => Ok(t),
+        Ok(t) => crypt::open(&t).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(e) => Err(e.to_string()),
     }
@@ -124,6 +127,7 @@ fn write_note(folder: Option<String>, name: String, text: String) -> Result<(), 
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
+    let text = crypt::seal_for_path(&p, &text).map_err(|e| e.to_string())?;
     fs::write(&p, text).map_err(|e| e.to_string())
 }
 
@@ -246,6 +250,137 @@ fn app_version() -> String {
 /// git2 calls block, so they run on a worker thread.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
+}
+
+// ---------- encryption (AES-256-GCM, see cli/src/crypt.rs) ----------
+
+/// Text file of a todo list / note: decrypted when it is encrypted. Errors containing "password required" /
+/// "wrong password" make the UI ask for the password.
+#[tauri::command]
+async fn read_text(path: String) -> Result<String, String> {
+    blocking(move || {
+        let t = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        crypt::open(&t).map_err(|e| e.to_string())
+    })
+    .await?
+}
+
+/// Write a todo list: encrypted when encryption is switched on.
+#[tauri::command]
+async fn write_text(path: String, text: String) -> Result<(), String> {
+    blocking(move || {
+        let out = crypt::seal_for_path(Path::new(&path), &text).map_err(|e| e.to_string())?;
+        fs::write(&path, out).map_err(|e| e.to_string())
+    })
+    .await?
+}
+
+#[derive(serde::Serialize)]
+struct CryptStatus {
+    enabled: bool,
+    /// A password is known in this session (the encrypted files can be opened).
+    unlocked: bool,
+    /// The password is kept in the OS keyring.
+    stored: bool,
+    /// Windows Hello is requested before the stored password is used.
+    hello: bool,
+    /// Windows Hello / a biometric check exists on this computer.
+    hello_available: bool,
+}
+
+#[tauri::command]
+async fn crypt_status() -> Result<CryptStatus, String> {
+    blocking(|| CryptStatus {
+        enabled: crypt::enabled(),
+        unlocked: crypt::has_session(),
+        stored: crypt::has_stored_password(),
+        hello: crypt::hello_enabled(),
+        hello_available: crypt::hello_available(),
+    })
+    .await
+}
+
+/// Unlock: with `password` use it for this session (it is verified by reading the file afterwards), without it take
+/// the keyring password (after Windows Hello when switched on) or `TODO_PASSWORD`.
+#[tauri::command]
+async fn crypt_unlock(password: Option<String>) -> Result<(), String> {
+    blocking(move || match password {
+        Some(p) if !p.is_empty() => {
+            crypt::set_session(Some(p));
+            Ok(())
+        }
+        _ => crypt::unlock().map_err(|e| e.to_string()),
+    })
+    .await?
+}
+
+/// Keep the session password in the OS keyring (call after it was verified).
+#[tauri::command]
+async fn crypt_remember() -> Result<(), String> {
+    blocking(|| {
+        let p = crypt::session_password().ok_or("no password to store")?;
+        crypt::store_password(&p)
+    })
+    .await?
+}
+
+/// Remove the password from the keyring (the session password stays until it is locked).
+#[tauri::command]
+async fn crypt_forget() -> Result<(), String> {
+    blocking(crypt::forget_stored_password)
+    .await?
+}
+
+/// Forget the password in memory only (the next access asks again / uses the keyring).
+#[tauri::command]
+fn crypt_lock() {
+    crypt::set_session(None);
+}
+
+/// Windows Hello: ask the user to verify now (true = verified).
+#[tauri::command]
+async fn crypt_verify() -> Result<bool, String> {
+    blocking(|| crypt::verify_user("Confirm it is you")).await?
+}
+
+/// Switch encryption on/off for what is written from now on (the config file is written by the page).
+#[tauri::command]
+fn crypt_set_enabled(on: bool) {
+    crypt::set_enabled_override(Some(on));
+}
+
+/// Re-write local files: decrypt with the session password, then encrypt with `new_password` (None = leave plain).
+/// With `folder` the whole folder (lists + notes) is converted, else `files` (+ the single-file notes).
+/// Returns the number of changed files.
+#[tauri::command]
+async fn crypt_convert(folder: Option<String>, files: Vec<String>, encrypt: bool, new_password: Option<String>) -> Result<usize, String> {
+    blocking(move || -> Result<usize, String> {
+        let old = crypt::session_password();
+        let new_owned = if encrypt { new_password.or_else(crypt::session_password) } else { None };
+        let new = new_owned.as_deref();
+        let e = |e: crypt::Error| e.to_string();
+        let mut n = 0;
+        match folder.as_deref().filter(|f| !f.is_empty()) {
+            Some(d) => n += crypt::convert_dir(Path::new(d), old.as_deref(), new).map_err(e)?,
+            None => {
+                for f in &files {
+                    let p = Path::new(f);
+                    if p.exists() && crypt::convert_file(p, old.as_deref(), new).map_err(e)? {
+                        n += 1;
+                    }
+                }
+                n += crypt::convert_flat(&home_dir().join(".todo.txt").join("notes"), old.as_deref(), new).map_err(e)?;
+            }
+        }
+        if let Some(p) = new {
+            crypt::set_session(Some(p.to_string()));
+            if crypt::has_stored_password() {
+                let _ = crypt::store_password(p); // keep the keyring in step with a changed password
+            }
+        }
+        Ok(n)
+    })
+    .await?
 }
 
 
@@ -625,7 +760,17 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
-                list_txt_files,
+                read_text,
+                write_text,
+                crypt_status,
+                crypt_unlock,
+                crypt_remember,
+                crypt_forget,
+                crypt_lock,
+                crypt_verify,
+                crypt_set_enabled,
+                crypt_convert,
+                                list_txt_files,
                 read_note,
                 write_image,
                 read_image,
@@ -660,7 +805,17 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
-                list_txt_files,
+                read_text,
+                write_text,
+                crypt_status,
+                crypt_unlock,
+                crypt_remember,
+                crypt_forget,
+                crypt_lock,
+                crypt_verify,
+                crypt_set_enabled,
+                crypt_convert,
+                                list_txt_files,
                 read_note,
                 write_image,
                 read_image,

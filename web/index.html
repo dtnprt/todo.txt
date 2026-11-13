@@ -97,6 +97,7 @@
         <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
         <button type="button" role="tab" data-tab="appearance" aria-selected="false">Appearance</button>
         <button type="button" role="tab" data-tab="themes" aria-selected="false">Themes</button>
+        <button type="button" role="tab" data-tab="security" aria-selected="false" id="secTab" style="display:none">Security</button>
         <button type="button" role="tab" data-tab="about" aria-selected="false">About</button>
         <button type="button" role="tab" data-tab="webdav" aria-selected="false" id="davTab" style="display:none">WebDAV</button>
       </div>
@@ -129,6 +130,17 @@
           <div id="themeVariantBox" class="variant-box"></div>
           <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
         </div>
+      </div>
+      <div class="set-pane" data-pane="security" hidden>
+        <h3 class="set-sub">Encryption</h3>
+        <button id="encToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Encrypt my files (AES-256-GCM)</button>
+        <span class="set-hint">Lists, notes and the WebDAV offline cache are written encrypted, so a git remote or a WebDAV server only ever sees ciphertext. Pasted images are not encrypted. Keep the password safe: without it the files cannot be read.</span>
+        <h3 class="set-sub">Password</h3>
+        <span class="set-hint" id="encStatus"></span>
+        <button id="encPassword"><i class="fa-solid fa-key" aria-hidden="true"></i> Set / change password…</button>
+        <button id="encStore" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Keep the password in the system keyring</button>
+        <button id="encHello" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Ask Windows Hello (fingerprint, face or PIN) before using the stored password</button>
+        <button id="encLock"><i class="fa-solid fa-lock" aria-hidden="true"></i> Lock now (forget the password in memory)</button>
       </div>
       <div class="set-pane" data-pane="about" hidden>
         <div class="about">

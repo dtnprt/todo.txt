@@ -280,6 +280,8 @@ pub fn get(server: &Server, url: &str) -> Result<(String, Option<String>), Error
     let etag = res.header("ETag").map(str::to_string);
     let mut text = String::new();
     res.into_reader().take(32 << 20).read_to_string(&mut text).map_err(|e| Error::Other(e.to_string()))?;
+    // encrypted files (todotxt-enc1) are decrypted here and encrypted again in `put`
+    let text = crate::crypt::open(&text).map_err(|e| Error::Other(e.to_string()))?;
     Ok((text, etag))
 }
 
@@ -287,14 +289,15 @@ pub fn get(server: &Server, url: &str) -> Result<(String, Option<String>), Error
 /// (`Error::Conflict` otherwise); without it the file is overwritten or created. Returns the new ETag.
 /// Missing parent folders are created.
 pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result<Option<String>, Error> {
+    let sealed = crate::crypt::seal_if_enabled(text).map_err(|e| Error::Other(e.to_string()))?;
     let mut headers: Vec<(&str, &str)> = vec![("Content-Type", "text/plain; charset=utf-8")];
     if let Some(e) = etag {
         headers.push(("If-Match", e));
     }
-    let res = match call(server, "PUT", url, &headers, Some(text)) {
+    let res = match call(server, "PUT", url, &headers, Some(&sealed)) {
         Err(Error::Other(m)) if m.contains("409") => {
             make_parents(server, url)?;
-            call(server, "PUT", url, &headers, Some(text))?
+            call(server, "PUT", url, &headers, Some(&sealed))?
         }
         other => other?,
     };

@@ -8,6 +8,7 @@
 //!   todo -e 3 | -c 3 TEXT | -d 3       edit / change / delete line 3
 
 mod config;
+mod crypt;
 mod davcache;
 mod editor;
 mod folder;
@@ -151,6 +152,26 @@ struct Cli {
     #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
     webdav_ls: Option<String>,
 
+    /// Encryption (AES-256-GCM): on|off. Converts the open todo file / folder (lists, notes, done.txt) and encrypts every later save; asks for a password
+    #[arg(long, value_name = "on|off")]
+    encrypt: Option<String>,
+
+    /// Encryption: set the password (asks twice) and keep it in the OS keyring
+    #[arg(long)]
+    crypt_login: bool,
+
+    /// Encryption: forget the password stored in the OS keyring
+    #[arg(long)]
+    crypt_logout: bool,
+
+    /// Encryption: change the password and re-encrypt the files
+    #[arg(long)]
+    crypt_passwd: bool,
+
+    /// Encryption: ask for Windows Hello (biometrics / PIN) before the stored password is used on|off
+    #[arg(long, value_name = "on|off")]
+    crypt_hello: Option<String>,
+
     /// With -f: remember the file (default + known files) even if it is outside the folder of the remembered one
     #[arg(short = 'K', long)]
     keep: bool,
@@ -166,6 +187,130 @@ struct Cli {
     /// Text of the task to add (or the new text for --change)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, value_name = "TEXT")]
     words: Vec<String>,
+}
+
+fn crypt_switches(cli: &Cli) -> bool {
+    cli.encrypt.is_some() || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
+}
+
+fn parse_on_off(name: &str, v: &str) -> Result<bool, String> {
+    match v.to_lowercase().as_str() {
+        "on" | "true" | "1" | "yes" => Ok(true),
+        "off" | "false" | "0" | "no" => Ok(false),
+        _ => Err(format!("{name} takes on or off")),
+    }
+}
+
+/// A new password, asked twice.
+fn new_password(what: &str) -> Result<String, Box<dyn Error>> {
+    let a = store::prompt_password(&format!("New {what} password: ")).ok_or("no password given (or no terminal to ask on)")?;
+    let b = store::prompt_password("Repeat the password: ").ok_or("no password given")?;
+    if a != b {
+        return Err("the passwords differ".into());
+    }
+    Ok(a)
+}
+
+/// The password of the encrypted files: stored / session one, else asked for.
+fn current_password() -> Result<String, Box<dyn Error>> {
+    match crypt::resolve_password() {
+        Ok(p) => Ok(p),
+        Err(_) => store::prompt_password("Current password: ").ok_or_else(|| "no password given (or no terminal to ask on)".into()),
+    }
+}
+
+/// `--encrypt`, `--crypt-login`, `--crypt-logout`, `--crypt-passwd`, `--crypt-hello`.
+fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Option<&std::path::Path>) -> Result<(), Box<dyn Error>> {
+    let remote = webdav::is_remote(&path.to_string_lossy());
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+    // what is converted: the local lists + notes (folder mode: the folder; else the file, its done.txt and the single-file notes)
+    let convert = |old: Option<&str>, new: Option<&str>| -> Result<usize, Box<dyn Error>> {
+        let mut n = 0;
+        match folder {
+            Some(d) if !folder::is_remote_dir(d) => n += crypt::convert_dir(d, old, new)?,
+            _ => {
+                if !remote {
+                    if path.exists() && crypt::convert_file(path, old, new)? {
+                        n += 1;
+                    }
+                    let done = path.with_file_name("done.txt");
+                    if done.exists() && crypt::convert_file(&done, old, new)? {
+                        n += 1;
+                    }
+                }
+                n += crypt::convert_flat(&home.join(".todo.txt").join("notes"), old, new)?;
+            }
+        }
+        Ok(n)
+    };
+    if let Some(v) = &cli.crypt_hello {
+        let on = parse_on_off("--crypt-hello", v)?;
+        cfg.set_other("encrypt_hello", if on { "true" } else { "false" });
+        cfg.save()?;
+        println!("Windows Hello before using the stored password: {}", if on { "on" } else { "off" });
+        if on && !crypt::hello_available() {
+            eprintln!("note: Windows Hello is not available here (Windows only, needs a set-up PIN/fingerprint/face); the setting has no effect until it is");
+        }
+    }
+    if cli.crypt_logout {
+        crypt::forget_stored_password()?;
+        crypt::set_session(None);
+        println!("password removed from the keyring");
+    }
+    if cli.crypt_login {
+        let pw = new_password("encryption")?;
+        crypt::store_password(&pw)?;
+        crypt::set_session(Some(pw));
+        println!("password stored in the keyring");
+    }
+    if cli.crypt_passwd {
+        let old = current_password()?;
+        let new = new_password("encryption")?;
+        let n = if crypt::enabled() { convert(Some(&old), Some(&new))? } else { 0 };
+        if remote && crypt::enabled() {
+            let store = store::Store::load(path)?;
+            crypt::set_session(Some(new.clone()));
+            store.save(path)?;
+        }
+        if crypt::has_stored_password() {
+            crypt::store_password(&new)?;
+        }
+        crypt::set_session(Some(new));
+        println!("password changed ({n} file(s) re-encrypted)");
+    }
+    if let Some(v) = &cli.encrypt {
+        let on = parse_on_off("--encrypt", v)?;
+        if on {
+            let pw = match crypt::resolve_password() {
+                Ok(p) => p,
+                Err(_) => new_password("encryption")?,
+            };
+            crypt::set_session(Some(pw.clone()));
+            crypt::set_enabled_override(Some(true));
+            let n = convert(Some(&pw), Some(&pw))?;
+            if remote {
+                store::Store::load(path)?.save(path)?;
+            }
+            cfg.set_other("encrypt", "true");
+            cfg.save()?;
+            println!("encryption on: {n} file(s) encrypted{}", if remote { " (the remote list is encrypted on its next save; its notes stay plain)" } else { "" });
+            if !crypt::has_stored_password() {
+                println!("tip: todo --crypt-login keeps the password in the keyring so you are not asked every time");
+            }
+        } else {
+            let pw = current_password()?;
+            crypt::set_session(Some(pw.clone()));
+            crypt::set_enabled_override(Some(false));
+            let n = convert(Some(&pw), None)?;
+            if remote {
+                store::Store::load(path)?.save(path)?;
+            }
+            cfg.set_other("encrypt", "false");
+            cfg.save()?;
+            println!("encryption off: {n} file(s) decrypted");
+        }
+    }
+    Ok(())
 }
 
 fn main() {
@@ -222,6 +367,7 @@ fn webdav_cmds(cli: &Cli, cfg: &mut Config) -> Result<(), Box<dyn Error>> {
 
 fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     ops::enable_ansi();
+    store::allow_prompt(true);
     let mut cfg = Config::load();
 
     // WebDAV server management (no todo file involved)
@@ -276,7 +422,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
         && cli.done.is_none()
         && cli.note.is_none()
         && cli.priority.is_none()
-        && cli.parent.is_none();
+        && cli.parent.is_none()
+        && !crypt_switches(&cli);
     let info_only = idle && cli.verbose && !git_switches;
     let tui_mode = idle && !cli.verbose;
     if let (false, false, Some(d)) = (git_switches, tui_mode, &early_dir) {
@@ -410,6 +557,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     // commit (+ push) when this run changed the todo file or the note, if .todo-git.cfg allows it
     let _dav = if tui_mode { None } else { Some(DavNote(path.clone())) };
     let _auto = if tui_mode { None } else { Some(AutoCommit::new(folder.as_deref(), &path, cli.note.is_some())) };
+
+    // ---- encryption switches ----
+    if crypt_switches(&cli) {
+        return crypt_cmds(&cli, &mut cfg, &path, folder.as_deref());
+    }
 
     // ---- note ----
     if let Some(n) = cli.note {
@@ -712,6 +864,12 @@ fn print_info(cfg: &Config, path: &std::path::Path, folder: Option<&std::path::P
         println!("lists:      {} *.txt file(s) in the folder", files.len());
     }
     println!("notes:      {}", folder::note_dir(folder).display());
+    println!(
+        "encryption: {} · password {} · Windows Hello {}",
+        if crypt::enabled() { "on (AES-256-GCM)" } else { "off" },
+        if crypt::has_stored_password() { "in the keyring" } else { "not stored (todo --crypt-login)" },
+        if crypt::hello_enabled() { if crypt::hello_available() { "on" } else { "on, but not available" } } else { "off" }
+    );
     println!("sort:       {sort:?}");
     println!(
         "options:    showdone {} · sidebar {} · calendar {} · statusbar {}",

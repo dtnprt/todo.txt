@@ -164,3 +164,20 @@ test('paste: classify and build entries', async () => {
   assert.equal(P.entryItems(['(B) 2026-01-01 -- c'])[0].text, '(B) 2026-01-01 c');
   assert.deepEqual(P.noteSplit(['t', 'n1', ' n2']), { first: { level: 0, text: 't' }, note: 'n1\n n2\n' });
 });
+
+
+test('crypt.js: reads what the Rust implementation wrote and round-trips', async () => {
+  const C = await import('../crypt.js');
+  // written by `todo --encrypt on` (cli/src/crypt.rs) with the password "pä ss"
+  const fromRust = 'todotxt-enc1 pbkdf2-sha256 600000 fxHyVV1goyzXVA0NIURJXw== ObR1kPqBya4/Sg6f\n'
+    + 'DLwuPfo7k80APMuuQswpiv53tHuT9Fch66TPOI+twZ5fJ3fF0pf37o7DAKIFxPNutIy6OyOL9mtS\n'
+    + 'LqPxKltHLi/mXJ26esSUY1itKctmWALzvDCBZ/B2ag==\n';
+  assert.ok(C.isEncrypted(fromRust));
+  assert.equal(await C.open(fromRust, 'pä ss'), '(A) 2026-01-01 Käse kaufen +einkauf\nx 2026-01-02 2026-01-01 done thing\n');
+  await assert.rejects(() => C.open(fromRust, 'nope'), /wrong password/);
+  const mine = await C.seal('hello ☕\n', 'pw', { iterations: 1000 });
+  assert.match(mine, /^todotxt-enc1 pbkdf2-sha256 1000 /);
+  assert.equal(await C.open(mine, 'pw'), 'hello ☕\n');
+  await assert.rejects(() => C.open(mine.replace(' 1000 ', ' 1001 '), 'pw'), /wrong password/);   // the header is authenticated
+  assert.ok(!C.isEncrypted('(A) todotxt-enc1 x'));
+});

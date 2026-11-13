@@ -1,6 +1,6 @@
 [package]
 name = "todotxt"
-version = "0.1.50"
+version = "0.1.51"
 description = "todo.txt desktop app"
 edition = "2021"
 
@@ -18,18 +18,34 @@ tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 ureq = "2"
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 git2 = "0.21"
 auth-git2 = "0.6"
 
-[target.'cfg(target_os = "android")'.dependencies]
-aes-gcm = "0.10"
-getrandom = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Foundation", "Security_Credentials_UI"] }
 keyring = { version = "3", features = ["windows-native"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "vendored"] }
+
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3

@@ -1,6 +1,6 @@
 [package]
 name = "todo-cli"
-version = "0.1.50"
+version = "0.1.51"
 edition = "2021"
 description = "todo.txt command line tool with an interactive terminal UI"
 
@@ -18,8 +18,14 @@ git2 = "0.21"
 auth-git2 = "0.6"
 ureq = "2"
 rpassword = "7"
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Foundation", "Security_Credentials_UI"] }
 keyring = { version = "3", features = ["windows-native"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
@@ -29,3 +35,17 @@ keyring = { version = "3", features = ["sync-secret-service", "vendored"] }
 [profile.release]
 lto = true
 strip = true
+
+# key derivation is slow without optimisation: keep the crypto crates fast in debug builds too
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3

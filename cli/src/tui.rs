@@ -281,6 +281,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         quit: false,
     };
     app.reload_view();
+    crate::store::allow_prompt(false);   // the terminal belongs to the UI now
     let mut terminal = ratatui::init();
     let res = app.event_loop(&mut terminal);
     ratatui::restore();
@@ -442,7 +443,7 @@ impl App {
     fn open_note_edit(&mut self, name: &str, word: bool) {
         match folder::prepare_note(&self.path, self.folder.as_deref(), name) {
             Ok(n) => {
-                let text = fs::read_to_string(&n.local).unwrap_or_default();
+                let text = n.read();
                 self.assist = None;
                 self.note_edit = Some(NoteEdit { n, name: name.to_string(), word, ta: crate::textarea::TextArea::new(&text) });
             }
@@ -460,7 +461,7 @@ impl App {
         let Some(ne) = self.note_edit.take() else { return };
         let save = outcome == Outcome::Save;
         if save {
-            if let Err(e) = fs::write(&ne.n.local, ne.ta.text()) {
+            if let Err(e) = ne.n.write(&ne.ta.text()) {
                 self.msg = Some(format!("Could not write note: {e}"));
                 return;
             }
