@@ -30,6 +30,10 @@ Your tasks stay in a plain `todo.txt` file. Nothing is uploaded anywhere.
 
 Installers (Windows, macOS, Linux), the terminal app `todo` and a zip of the web app are on the [releases page](https://github.com/dtnprt/todo.txt/releases). A GitHub workflow (`.github/workflows/release.yml`) builds them whenever a push to `main` carries a new `VERSION` and publishes a pre-release `vX.Y.Z`. Builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn.
 
+## Branches and releases
+
+Work happens on `dev`. Every push to `main` is a release: the workflow builds the installers for the version in `VERSION` and publishes it (see above). To release, merge `dev` into `main` and push.
+
 ## Web
 
 No build step. Serve the folder over HTTP (ES modules need it) and open it:
