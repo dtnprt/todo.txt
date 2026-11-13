@@ -2484,7 +2484,7 @@ function render() {
   }
 
   if (!listMode) {
-    $('#davCorner').hidden = true;
+    $('#davCorner').hidden = !state.minimal;
     const ta = $('#raw');
     if (document.activeElement !== ta) ta.value = state.lines.join('\n');
     return;
@@ -2536,10 +2536,10 @@ function render() {
   {   // minimal mode hides the status bar: show the WebDAV file small and faint in the bottom left corner instead
     const dc = $('#davCorner');
     const lock = isFileEncrypted();
-    dc.hidden = !(state.minimal && ((davShown && state.cornerName) || lock));
+    dc.hidden = !state.minimal;   // always shown in minimal mode
     document.body.classList.toggle('has-corner', !dc.hidden);
     window.dispatchEvent(new Event('composer-pad'));   // minimal mode: the list leaves room for the small file name
-    dc.replaceChildren(...(lock ? [el('i', { className: 'fa-solid fa-lock corner-lock', title: 'Encrypted' })] : []), document.createTextNode(state.cornerName ? (davShown || (lock ? state.fileName : '')) : ''));
+    dc.replaceChildren(...(lock ? [el('i', { className: 'fa-solid fa-lock corner-lock', title: 'Encrypted' })] : []), document.createTextNode(davShown || state.fileName));
     dc.title = davFull;
   }
   statusHover = el('span', { className: 'status-hover' });
