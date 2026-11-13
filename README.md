@@ -26,6 +26,10 @@ Your tasks stay in a plain `todo.txt` file. Nothing is uploaded anywhere.
 - **Themes** (GUI): 30+ built-in (Nord, Dracula, Catppuccin, Solarized, Rosé Pine, Tokyo Night, … plus a few playful ones) and your own CSS files.
 - Files changed by another program (editor, sync client) are reloaded automatically.
 
+## Download
+
+Installers (Windows, macOS, Linux), the terminal app `todo` and a zip of the web app are on the [releases page](https://github.com/dtnprt/todo.txt/releases). A GitHub workflow (`.github/workflows/release.yml`) builds them whenever a push to `main` carries a new `VERSION` and publishes a pre-release `vX.Y.Z`. Builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn.
+
 ## Web
 
 No build step. Serve the folder over HTTP (ES modules need it) and open it:

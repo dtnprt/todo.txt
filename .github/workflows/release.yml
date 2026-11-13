@@ -1,126 +1,160 @@
+# Builds the desktop installers, the terminal app and the web app and publishes them as a GitHub release.
+# Runs on every push to main (the version comes from the VERSION file: ./build.ps1 counts it up with every build commit) and
+# can be started by hand. A release v<VERSION> is only created once: pushes without a new VERSION do nothing.
 name: release
 
-# Push a tag like v0.1.2 (must match the VERSION file) to build everything and publish a GitHub release.
-# Run manually (Actions -> release -> Run workflow) to only build and get the files as workflow artifacts.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
-env:
-  CARGO_TERM_COLOR: always
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  check:
+  release:
+    name: create the release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      exists: ${{ steps.v.outputs.exists }}
+      id: ${{ steps.v.outputs.id }}
     steps:
       - uses: actions/checkout@v4
-      - name: Tag matches VERSION
-        if: startsWith(github.ref, 'refs/tags/v')
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          [ "${GITHUB_REF_NAME}" = "v$(tr -d '[:space:]' < VERSION)" ] || { echo "tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1; }
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag exists already: nothing to do"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "todo.txt $version" --prerelease \
+              --notes "Automatic build of commit ${GITHUB_SHA::7}. Vibe-coded with Claude Code: expect rough edges. Encryption is experimental."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)" >> "$GITHUB_OUTPUT"
 
-  web:
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Parser tests
-        working-directory: web
-        run: npm test
-      - name: Zip the web app
-        run: |
-          zip -r todo-txt-web.zip web -x 'web/test/*' 'web/package.json' 'web/version.json'
-      - uses: actions/upload-artifact@v4
-        with: { name: web, path: todo-txt-web.zip }
-
-  cli:
-    needs: check
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,  name: todo-linux-x86_64,   bin: todo }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc,    name: todo-windows-x86_64, bin: todo.exe }
-          - { os: macos-13,       target: x86_64-apple-darwin,       name: todo-macos-x86_64,   bin: todo }
-          - { os: macos-latest,   target: aarch64-apple-darwin,      name: todo-macos-arm64,    bin: todo }
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: '${{ matrix.target }}' }
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: cli }
-      - name: Test
-        working-directory: cli
-        run: cargo test --target ${{ matrix.target }}
-      - name: Build
-        working-directory: cli
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Package
-        shell: bash
-        run: |
-          mkdir out
-          cp "cli/target/${{ matrix.target }}/release/${{ matrix.bin }}" "out/${{ matrix.bin }}"
-          cp README.md LICENSE out/
-          cd out
-          if [ "${{ runner.os }}" = "Windows" ]; then 7z a "../${{ matrix.name }}.zip" . >/dev/null; else tar czf "../${{ matrix.name }}.tar.gz" .; fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: |
-            ${{ matrix.name }}.zip
-            ${{ matrix.name }}.tar.gz
-          if-no-files-found: ignore
-
-  # Desktop app (Tauri). macOS is left out until src-tauri/icons has an icon.icns (cargo tauri icon).
   desktop:
-    needs: check
+    name: desktop (${{ matrix.name }})
+    needs: release
+    if: needs.release.outputs.exists != 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04,   name: desktop-linux }
-          - { os: windows-latest, name: desktop-windows }
+          - name: windows
+            os: windows-latest
+            args: ""
+          - name: linux
+            os: ubuntu-22.04
+            args: ""
+          - name: macos-arm64
+            os: macos-latest
+            args: "--target aarch64-apple-darwin"
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-13
+            args: "--target x86_64-apple-darwin"
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Linux dependencies
-        if: runner.os == 'Linux'
+        with:
+          fetch-depth: 0
+      - name: Linux packages
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libsecret-1-dev libdbus-1-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src-tauri }
-      - name: Build (tauri-action without a tag only builds; the release job publishes)
-        uses: tauri-apps/tauri-action@v0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: |
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*-setup.exe
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.AppImage
-          if-no-files-found: error
+          releaseId: ${{ needs.release.outputs.id }}
+          args: ${{ matrix.args }}
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web, cli, desktop]
+  terminal:
+    name: terminal app (${{ matrix.name }})
+    needs: release
+    if: needs.release.outputs.exists != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, target: "", exe: todo.exe }
+          - { name: linux-x64, os: ubuntu-22.04, target: "", exe: todo }
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, exe: todo }
+          - { name: macos-x64, os: macos-13, target: x86_64-apple-darwin, exe: todo }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Linux packages
+        if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libsecret-1-dev libdbus-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      - name: build
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo build --release --manifest-path cli/Cargo.toml --target "${{ matrix.target }}"
+            out="cli/target/${{ matrix.target }}/release"
+          else
+            cargo build --release --manifest-path cli/Cargo.toml
+            out="cli/target/release"
+          fi
+          mkdir -p dist
+          cp "$out/${{ matrix.exe }}" dist/
+          cp README.md LICENSE dist/
+          v="${{ needs.release.outputs.version }}"
+          cd dist
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "../todo-cli-$v-${{ matrix.name }}.zip" .
+            echo "asset=todo-cli-$v-${{ matrix.name }}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "../todo-cli-$v-${{ matrix.name }}.tar.gz" .
+            echo "asset=todo-cli-$v-${{ matrix.name }}.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - name: upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.release.outputs.tag }}" "${{ env.asset }}" --clobber
+
+  web:
+    name: web app
+    needs: release
+    if: needs.release.outputs.exists != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with: { path: dist, merge-multiple: true }
-      - run: ls -R dist
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
-          draft: true
+      - uses: actions/checkout@v4
+      - name: zip and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ needs.release.outputs.version }}"
+          (cd web && zip -r "../todotxt-web-$v.zip" . -x 'test/*' 'package.json' 'version.json')
+          gh release upload "${{ needs.release.outputs.tag }}" "todotxt-web-$v.zip" --clobber
