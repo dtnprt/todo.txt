@@ -188,6 +188,9 @@ fn delete_image(folder: Option<String>, dir: Option<String>, name: String) -> Re
     }
 }
 
+// Android: the themes are compiled in (bundled resource files cannot be read there); empty elsewhere
+include!(concat!(env!("OUT_DIR"), "/embedded_themes.rs"));
+
 /// Own themes: `~/.todo.txt/themes/NAME.css` -> [(NAME, css)].
 #[tauri::command]
 fn list_user_themes(app: tauri::AppHandle) -> Vec<(String, String)> {
@@ -202,6 +205,9 @@ fn list_user_themes(app: tauri::AppHandle) -> Vec<(String, String)> {
     }
     dirs.push(home_dir().join(".todo.txt").join("themes"));
     let mut map = std::collections::BTreeMap::new();
+    for (name, css) in EMBEDDED_THEMES {
+        map.insert((*name).to_string(), (*css).to_string());
+    }
     for dir in dirs {
         if let Ok(rd) = fs::read_dir(dir) {
             for e in rd.flatten() {

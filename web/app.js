@@ -891,6 +891,12 @@ function renderKnownMenu() {
   box.replaceChildren(...rows);
 }
 
+/** Is the open file stored encrypted? (desktop: from `file_info`; browser: files are saved encrypted) */
+function isFileEncrypted() {
+  if (isTauri) return !!(state.path && fileInfo[state.path] && fileInfo[state.path].encrypted);
+  return webEncrypt && !!(state.handle || state.browserList);
+}
+
 /** Encrypt / decrypt one file (an exception in the `.todotxt.cfg` of its folder) and rewrite it now. */
 async function setFileEncryption(p, on) {
   if (on && !(await uiConfirm('Encryption is EXPERIMENTAL. Encrypted files can no longer be read by other todo.txt apps, editors or scripts. Keep a backup.\n\nEncrypt this file?'))) return;
@@ -1664,10 +1670,13 @@ function renderFileList() {
   const tick = () => el('span', { className: 'tick' }, el('i', { className: 'fa-solid fa-check' }));
   let rows = [];
   if (state.folder) {
-    rows = [el('div', { className: 'file-head', title: state.folder },
-      el('i', { className: 'fa-solid fa-folder' }), ' ', baseName(state.folder.replace(/[\\/]+$/, '')))];
+    // the icon says where the folder lives: cloud (WebDAV), git or local
+    const fkind = isRemote(state.folder) ? 'cloud' : (isTauri && state.git && state.git.repo ? 'git' : 'local');
+    const fname = isRemote(state.folder) ? (davName(state.folder) || davHost(state.folder)) : baseName(state.folder.replace(/[\\/]+$/, ''));
+    rows = [el('div', { className: 'file-head', title: `${KIND_LABEL[fkind]}: ${state.folder}` },
+      el('i', { className: `fa-solid fa-${KIND_ICON[fkind]}` }), ' ', fname)];
     for (const name of state.folderFiles) {
-      const pick = el('button', { className: 'file-pick', onclick: () => switchFolderFile(name) }, tick(), name);
+      const pick = el('button', { className: 'file-pick', title: `${KIND_LABEL[fkind]}: ${name}`, onclick: () => switchFolderFile(name) }, tick(), el('i', { className: `fa-solid fa-${KIND_ICON[fkind]} file-kind` }), name);
       pick.setAttribute('role', 'menuitemradio');
       pick.setAttribute('aria-checked', String(name === state.fileName));
       rows.push(el('div', { className: 'file-row' }, pick));
@@ -2374,6 +2383,7 @@ function render() {
     const k = $('#fileKind');
     k.className = `fa-solid fa-${kind[0]}`;
     k.title = kind[1];
+    $('#fileLock').hidden = !isFileEncrypted();   // a lock next to the kind icon: this file is stored encrypted
   }
   renderFileList();
   $('#dirty').hidden = !state.dirty;
@@ -2495,8 +2505,9 @@ function render() {
   }
   {   // minimal mode hides the status bar: show the WebDAV file small and faint in the bottom left corner instead
     const dc = $('#davCorner');
-    dc.hidden = !(state.minimal && davShown && state.cornerName);
-    dc.textContent = davShown;
+    const lock = isFileEncrypted();
+    dc.hidden = !(state.minimal && ((davShown && state.cornerName) || lock));
+    dc.replaceChildren(...(lock ? [el('i', { className: 'fa-solid fa-lock corner-lock', title: 'Encrypted' })] : []), document.createTextNode(state.cornerName ? (davShown || (lock ? state.fileName : '')) : ''));
     dc.title = davFull;
   }
   statusHover = el('span', { className: 'status-hover' });
@@ -2975,10 +2986,13 @@ document.addEventListener('mousedown', (e) => {
     || t.id === 'addForm' || t.classList.contains('topbar') || t.classList.contains('spacer') || t.classList.contains('win-ctl')
     || t.id === 'sidebar' || t.classList.contains('empty');
   if (!free) {
-    // Minimal mode: dragging an entry moves the window (only after the mouse has moved a few pixels, so a click or a double
-    // click still selects / edits the entry). Buttons, links, inputs, chips, the grip and scrollbars keep their own behaviour.
+    // Dragging moves the window - after the mouse has moved a few pixels, so clicks and double clicks keep working - on
+    //  * entries in minimal mode (not on buttons, links, inputs, chips, the grip, the priority dropdown),
+    //  * every element of the settings overlay that does not have to be clicked (text, headings, hints, the box, the backdrop).
     const row = state.minimal && state.editing === null && t instanceof Element ? t.closest('#list .task') : null;
-    if (row && !t.closest('button, a, input, select, textarea, .grip, .dd, .actions, .chip, .edit')) {
+    const inSettings = !settingsEl.hidden && t instanceof Element && t.closest('#settings');
+    const clickable = t instanceof Element && t.closest('button, a, input, select, textarea, label, [role=tab], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], .grip, .dd, .actions, .chip, .edit, .scroll-area');
+    if ((row && !clickable) || (inSettings && !(t instanceof Element && t.closest('button, a, input, select, textarea, label, [role=tab], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], .kf-row, #themeMenu, #knownFiles, #knownFolders')))) {
       const x0 = e.clientX, y0 = e.clientY;
       const stop = () => { document.removeEventListener('mousemove', move, true); document.removeEventListener('mouseup', stop, true); };
       const move = (m) => {

@@ -607,3 +607,10 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
 body:not(.android).minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1 !important; transform: none !important; pointer-events: auto !important; z-index: auto; }
 body:not(.android).minimal .layout { padding-bottom: 0; }
 body:not(.android).minimal #list > .task:last-child { margin-bottom: 0 !important; }
+/* minimal mode: no offsets are left over from the old floating input bar (they would shift the relative bar sideways) */
+body:not(.android).minimal .layout .composer, body:not(.android).minimal .layout.no-side .composer { left: 0 !important; right: 0 !important; }
+
+/* lock icon of an encrypted file: next to the kind icon in the top bar, in front of the file name in the minimal-mode corner */
+.file-lock { font-size: .72em; margin-left: .15em; color: var(--ok); }
+.file-lock[hidden] { display: none; }
+.dav-corner .corner-lock { margin-right: .4em; }
