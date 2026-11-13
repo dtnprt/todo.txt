@@ -2507,6 +2507,7 @@ function render() {
     const dc = $('#davCorner');
     const lock = isFileEncrypted();
     dc.hidden = !(state.minimal && ((davShown && state.cornerName) || lock));
+    document.body.classList.toggle('has-corner', !dc.hidden);   // minimal mode: the list leaves room for the small file name
     dc.replaceChildren(...(lock ? [el('i', { className: 'fa-solid fa-lock corner-lock', title: 'Encrypted' })] : []), document.createTextNode(state.cornerName ? (davShown || (lock ? state.fileName : '')) : ''));
     dc.title = davFull;
   }
@@ -3260,7 +3261,17 @@ if (pendingBrowserList) openBrowserList(pendingBrowserList);
 // height of the add/search bar for the sidebar (it scrolls above the bar instead of under it)
 {
   const form = $('#addForm');
-  if (form && 'ResizeObserver' in window) new ResizeObserver(() => document.documentElement.style.setProperty('--composer-h', form.offsetHeight + 'px')).observe(form);
+  if (form && 'ResizeObserver' in window) {
+    // natural height of the bar = its parts + the padding of the form (10px + 12px); measured from the children, so it is right
+    // while the bar slides in or is collapsed in minimal mode (the form itself is animated there)
+    const measure = () => {
+      const h = [...form.children].reduce((n, c) => n + (c.hidden ? 0 : c.offsetHeight), 0) + 22;
+      if (h > 30) document.documentElement.style.setProperty('--composer-h', h + 'px');
+    };
+    const ro = new ResizeObserver(measure);
+    for (const c of form.children) ro.observe(c);
+    measure();
+  }
 }
 
 // ---------- Android: lists in the app storage / on the SD card, filter drawer, back button ----------

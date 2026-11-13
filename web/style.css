@@ -606,7 +606,9 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
    over the entries) and is only there while the mouse is over the window or the bar has the focus; the list box shrinks upwards by
    exactly the height of the bar and grows back when it goes away. */
 body:not(.android).minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1; transform: none; pointer-events: auto; z-index: auto; }
-body:not(.android).minimal:not(.show-input) .composer:not(:focus-within) { display: none; }
+/* it slides in from below while the list box shrinks upwards in the same animation (max-height from 0 to the natural height of the bar) */
+body:not(.android).minimal .composer { box-sizing: border-box; max-height: var(--composer-h, 76px); transition: max-height .28s cubic-bezier(.2, .8, .2, 1), padding .28s cubic-bezier(.2, .8, .2, 1), opacity .22s ease, transform .28s cubic-bezier(.2, .8, .2, 1); }
+body:not(.android).minimal:not(.show-input) .composer:not(:focus-within) { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; transform: translateY(14px); pointer-events: none; overflow: hidden; }
 body:not(.android).minimal .layout { padding-bottom: 0; }
 body:not(.android).minimal #list > .task:last-child { margin-bottom: 0 !important; }
 /* minimal mode: no offsets are left over from the old floating input bar (they would shift the relative bar sideways) */
@@ -616,3 +618,8 @@ body:not(.android).minimal .layout .composer, body:not(.android).minimal .layout
 .file-lock { font-size: .72em; margin-left: .15em; color: var(--ok); }
 .file-lock[hidden] { display: none; }
 .dav-corner .corner-lock { margin-right: .4em; }
+
+/* minimal mode: the small file name / lock in the bottom left corner is never covered by the list: room below the list while the
+   input bar is away (the bar's own padding takes over when it slides in and the corner fades out) */
+body:not(.android).minimal .layout { transition: padding-bottom .28s cubic-bezier(.2, .8, .2, 1); }
+body:not(.android).minimal.has-corner:not(.show-input) .layout:not(:has(.composer:focus-within)) { padding-bottom: 22px; }
