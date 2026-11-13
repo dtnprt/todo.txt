@@ -637,3 +637,10 @@ body.minimal.keep-input .dav-corner { opacity: .3 !important; }
    sits under the box instead of on top of it */
 body.minimal.has-corner { --composer-pad-b: 28px; }
 body.minimal.has-corner .dav-corner { opacity: .35 !important; }   /* the label stays visible (it has its own room below the input bar now) */
+/* minimal mode: the input bar lines up with the entries (starts right of the sidebar like in the normal mode; `margin: 0` of the old floating bar had moved it to the left edge) */
+body:not(.android).minimal .layout .composer { margin-left: 16px; }
+body:not(.android).minimal .layout.no-side .composer { margin-left: 0; }
+@media (max-width: 720px) { body:not(.android).minimal .layout .composer { margin-left: 0; } }
+/* sidebar section clear button: just the x, no box (themes style every button, so be explicit) */
+button.clear-x, button.clear-x:hover, button.clear-x:focus { border: 0 !important; background: none !important; box-shadow: none !important; width: auto; height: auto; padding: 2px 4px; color: var(--accent); }
+button.clear-x:hover { color: var(--text); }
