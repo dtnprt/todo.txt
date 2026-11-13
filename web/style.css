@@ -492,5 +492,5 @@ body:not(.android) .sidebar { position: static; align-self: stretch; max-height:
 body:not(.android) .composer { position: relative; bottom: auto; }
 body:not(.android).minimal .composer { position: fixed; bottom: 0; }
 body:not(.android).minimal .sidebar { top: auto; max-height: none; }
-/* minimal mode: the input bar floats over the list, so the list gets room below the last entry to scroll it clear of the bar */
-body:not(.android).minimal #list, body:not(.android).minimal #raw { padding-bottom: calc(var(--composer-h, 76px) + 8px); box-sizing: border-box; }
+/* minimal mode: the input bar floats over the bottom of the window, so the list ends above it (margin, not padding: the list frame ends there) */
+body:not(.android).minimal #list, body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
