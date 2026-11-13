@@ -20,7 +20,7 @@ Your tasks stay in a plain `todo.txt` file. Nothing is uploaded anywhere.
 - **Due colours**: overdue, today and soon-due tasks are highlighted.
 - **Notes**: `note:NAME` attaches a longer text to a task, stored in `notes/NAME.txt`. In the GUI just type `note:` and a note editor opens.
 - **Folder mode**: use a whole folder of `*.txt` lists and switch between them.
-- **Encryption** (optional): lists, notes and the WebDAV cache as AES-256-GCM files; password in the OS keyring, optionally released only after Windows Hello. Works in git folders and on WebDAV (they only see ciphertext). `todo --encrypt on`, or Settings → Security.
+- **Encryption** (optional, *experimental*): lists, notes and the WebDAV cache as AES-256-GCM files; password in the OS keyring, optionally released only after Windows Hello. Works in git folders and on WebDAV (they only see ciphertext). `todo --encrypt on`, or Settings → Security.
 - **Git sync** (optional, opt-in per folder): pull on start, commit and push after every change, manual sync.
 - **Sorting, filtering, drag & drop re-prioritising, undo/redo, archive finished tasks.**
 - **Themes** (GUI): 30+ built-in (Nord, Dracula, Catppuccin, Solarized, Rosé Pine, Tokyo Night, … plus a few playful ones) and your own CSS files.
@@ -80,7 +80,9 @@ todo -v                                # show folder, file, git state, version, 
 
 `~/.config/todo.cfg` (`%USERPROFILE%\.config\todo.cfg` on Windows), plain `key=value` lines, shared by the terminal and desktop apps: `file=`, `folder=`, `sort=`, `showdone=`, `sidebar=`, `calendar=`, `statusbar=`.
 
-### Encryption
+### Encryption (experimental)
+
+> **Experimental:** this feature is new and has not been reviewed or tested widely. Make a backup first (`todo --backup`) and do not rely on it for highly sensitive data. **Encrypted files can no longer be read by other todo.txt apps, editors or scripts** - only by the clients of this project.
 
 ```sh
 todo --encrypt on        # asks for a password, encrypts the open file/folder (lists + notes), encrypts every later save

@@ -21,6 +21,7 @@
       <div class="dd-menu" role="menu" hidden>
         <button id="new" role="menuitem"><i class="fa-solid fa-file" aria-hidden="true"></i> New</button>
         <button id="open" role="menuitem"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Open…</button>
+        <button id="browserStorage" role="menuitem" title="Keep lists inside this browser (localStorage)"><i class="fa-solid fa-database" aria-hidden="true"></i> Browser storage…</button>
         <button id="openFolder" role="menuitem"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i> Open folder…</button>
         <button id="openDav" role="menuitem" style="display:none"><i class="fa-solid fa-cloud" aria-hidden="true"></i> WebDAV…</button>
         <button id="moveProjects" role="menuitem" style="display:none" title="Move the tasks of a project (filter) with their sub-entries into another file"><i class="fa-solid fa-right-left" aria-hidden="true"></i> Move projects…</button>
@@ -134,7 +135,8 @@
         </div>
       </div>
       <div class="set-pane" data-pane="security" hidden>
-        <h3 class="set-sub">Encryption</h3>
+        <h3 class="set-sub">Encryption <span class="exp-badge" title="Not widely tested yet">experimental</span></h3>
+        <span class="set-hint exp-note"><b>Experimental.</b> This feature is new and has not been reviewed or tested widely. Keep a backup of your files (File → Backup as .zip…) before you switch it on, and do not rely on it for highly sensitive data. <b>Encrypted files can no longer be read by other todo.txt apps, editors or scripts</b> – only by this app (web, desktop, terminal), which all share the format.</span>
         <button id="encToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Encrypt my files (AES-256-GCM)</button>
         <span class="set-hint">Lists, notes and the WebDAV offline cache are written encrypted, so a git remote or a WebDAV server only ever sees ciphertext. Pasted images are not encrypted. Keep the password safe: without it the files cannot be read.</span>
         <h3 class="set-sub">Password</h3>

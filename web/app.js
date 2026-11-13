@@ -105,6 +105,7 @@ const state = {
   sidebar: !isAndroid,   // Android: the filter drawer, closed at start
   calendar: true,
   minimal: false,
+  browserList: null,   // web: name of the list kept in the browser storage (localStorage), see browserStorageDialog
   statusBar: true,
   scrollbars: true,    // thin themed scrollbars (visible on hover / while scrolling); Settings -> View
   touchBar: isAndroid || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches),   // helper bar under the input (touch screens); Settings -> General
@@ -128,18 +129,28 @@ let parentRaw = null;  // text of that line (line numbers move when the list is 
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      lines: state.lines, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
+      lines: state.browserList && webEncrypt ? null : state.lines, browserList: state.browserList, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
       sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, scrollbars: state.scrollbars, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
+  // browser storage: save the list there shortly after every change
+  clearTimeout(browserSaveTimer);
+  if (!isTauri && state.browserList && state.dirty) {
+    browserSaveTimer = setTimeout(() => { if (state.browserList && state.dirty && state.editing === null) save(); }, 500);
+  }
 }
 
+let pendingBrowserList = null;   // encrypted browser list to reopen (password dialog) once the page is up
 function restore() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     if (!s) return;
     state.lines = Array.isArray(s.lines) ? s.lines : [];
+    if (!isTauri && typeof s.browserList === 'string') {
+      state.browserList = s.browserList;
+      if (s.lines === null) pendingBrowserList = s.browserList;   // saved without the plain text (encryption): reopen it from the storage
+    }
     state.fileName = s.fileName || 'todo.txt';
     state.dirty = !!s.dirty;
     state.path = isTauri && typeof s.path === 'string' ? s.path : null;
@@ -300,6 +311,7 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   state.lines = T.parseFile(text);
   state.undo = [];
   state.fileName = name;
+  state.browserList = null;   // openBrowserList sets it again
   state.handle = handle;
   // shared with the CLI/TUI: they follow the file chosen here - but not a file from a folder unknown to them
   if (isTauri && path && path !== state.path) isKnownFile(path).then((k) => { if (k) setCfg('lastfile', path); });
@@ -411,6 +423,119 @@ async function webDecode(text, interactive = true) {
   }
 }
 
+
+// ---------- browser storage (web version): lists kept in localStorage ----------
+// File -> Browser storage…: named lists live in this browser (`todotxt.list.NAME`), are saved there automatically and need
+// no file access. They are encrypted when "Encrypt files" is on (Settings -> Security). Not synced anywhere.
+const LIST_KEY = 'todotxt.list.';
+let browserSaveTimer = null;
+const browserLists = () => {
+  const out = [];
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(LIST_KEY)) out.push(k.slice(LIST_KEY.length)); } } catch { /* storage blocked */ }
+  return out.sort((a, b) => a.localeCompare(b));
+};
+const listNameOk = (n) => /^[^\\/:*?"<>|]{1,60}$/.test(n);
+
+async function writeBrowserList(name, text) {
+  const out = await webEncode(text);
+  try { localStorage.setItem(LIST_KEY + name, out); }
+  catch (e) { throw new Error(`The browser storage is full or blocked (${e.message || e}). Download the list or free some space.`); }
+}
+
+async function openBrowserList(name) {
+  const raw = localStorage.getItem(LIST_KEY + name);
+  if (raw === null) { alert(`There is no list "${name}" in the browser storage.`); return; }
+  let text;
+  try { text = await webDecode(raw); } catch (e) { alert(`Could not open "${name}": ${e.message || e}`); return; }
+  leaveFolder();
+  loadText(text, name);
+  state.browserList = name;
+  persist();
+  render();
+}
+
+function browserStorageDialog() {
+  if (isTauri || document.getElementById('bsDlg')) return;
+  const close = () => { document.removeEventListener('keydown', onKey, true); ov.remove(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  const body = el('div', { className: 'bs-list' });
+  const nameIn = el('input', { type: 'text', placeholder: 'List name', spellcheck: false, 'aria-label': 'List name', value: state.browserList ? '' : '' });
+  const err = el('div', { className: 'pw-err' });
+  const draw = () => {
+    body.replaceChildren();
+    const names = browserLists();
+    if (!names.length) body.append(el('p', { className: 'set-hint', textContent: 'No lists in the browser storage yet.' }));
+    for (const n of names) {
+      const raw = localStorage.getItem(LIST_KEY + n) || '';
+      const info = C.isEncrypted(raw) ? 'encrypted' : `${raw.split(/\r?\n/).filter((l) => l.trim()).length} tasks`;
+      body.append(el('div', { className: 'bs-row' },
+        el('span', { className: 'bs-name', textContent: n + (n === state.browserList ? ' (open)' : '') }),
+        el('small', { textContent: info }),
+        el('button', { type: 'button', textContent: 'Open', onclick: async () => { if (!confirmDiscard()) return; close(); await openBrowserList(n); } }),
+        el('button', { type: 'button', textContent: 'Download', title: 'Save a copy as a .txt file', onclick: async () => {
+          try {
+            const text = await webDecode(raw);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+            a.download = n.endsWith('.txt') ? n : `${n}.txt`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          } catch (e) { err.textContent = String(e.message || e); }
+        } }),
+        el('button', { type: 'button', textContent: 'Delete', onclick: () => {
+          if (!confirm(`Delete "${n}" from the browser storage? This cannot be undone.`)) return;
+          try { localStorage.removeItem(LIST_KEY + n); } catch { /* ignore */ }
+          if (state.browserList === n) { state.browserList = null; persist(); render(); }
+          draw();
+        } })));
+    }
+  };
+  const target = () => {
+    const n = nameIn.value.trim();
+    if (!listNameOk(n)) { err.textContent = 'Enter a name (up to 60 characters, none of \\ / : * ? " < > |).'; nameIn.focus(); return null; }
+    err.textContent = '';
+    return n;
+  };
+  const create = async () => {
+    const n = target();
+    if (!n) return;
+    if (localStorage.getItem(LIST_KEY + n) !== null) { err.textContent = `"${n}" exists already: open it from the list.`; return; }
+    if (!confirmDiscard()) return;
+    try { await writeBrowserList(n, ''); } catch (e) { err.textContent = String(e.message || e); return; }
+    close();
+    await openBrowserList(n);
+  };
+  const saveHere = async () => {
+    const n = target();
+    if (!n) return;
+    if (localStorage.getItem(LIST_KEY + n) !== null && n !== state.browserList && !confirm(`Replace the list "${n}" in the browser storage?`)) return;
+    try { applySortToLines(); await writeBrowserList(n, T.serializeFile(state.lines)); } catch (e) { err.textContent = String(e.message || e); return; }
+    state.browserList = n;
+    state.fileName = n;
+    state.handle = null;
+    state.dirty = false;
+    persist();
+    render();
+    close();
+  };
+  const ov = el('div', { id: 'bsDlg', className: 'help', onmousedown: (e) => { if (e.target === ov) close(); } },
+    el('div', { className: 'help-box pw-box bs-box', role: 'dialog', 'aria-label': 'Browser storage' },
+      el('h2', { textContent: 'Browser storage' }),
+      el('p', { textContent: 'Lists kept inside this browser (localStorage, about 5 MB). They are saved automatically while you work and need no file access. They are not synced anywhere, and clearing the site data deletes them: download a copy now and then.' }),
+      body,
+      el('hr'),
+      nameIn,
+      err,
+      el('div', { className: 'pw-actions' },
+        el('button', { type: 'button', className: 'primary', textContent: 'New empty list', onclick: create }),
+        el('button', { type: 'button', textContent: state.browserList ? 'Save current list as…' : 'Save current list here', onclick: saveHere }),
+        el('button', { type: 'button', textContent: 'Close', onclick: close }))));
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(ov);
+  draw();
+  nameIn.focus();
+}
+
 /** Image bytes written in the browser (folder mode): encrypted when switched on. Takes a Blob, returns a Blob. */
 async function webEncodeBytes(blob) {
   if (isTauri || !webEncrypt) return blob;
@@ -493,7 +618,7 @@ async function setEncryption(on) {
   try {
     if (on) {
       if (!st.unlocked) {
-        const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password. You need it to open the files on every computer; there is no way to recover it.', confirm: true });
+        const a = await askPassword({ title: 'Encrypt files', message: 'Encryption is EXPERIMENTAL: keep a backup of your files, and note that other todo.txt apps cannot read encrypted files any more. Choose a password. You need it to open the files on every computer; there is no way to recover it.', confirm: true });
         if (!a) return;
         await invoke('crypt_unlock', { password: a.password });
         if (a.remember) await invoke('crypt_remember');
@@ -846,6 +971,8 @@ async function save({ as = false } = {}) {
       await writeAny(p, text);
       diskText = text;
       if (!isRemote(p)) gitChanged(baseName(p));
+    } else if (state.browserList && !as) {
+      await writeBrowserList(state.browserList, text);
     } else if (hasFSA) {
       if (as || !state.handle) {
         state.handle = await window.showSaveFilePicker({
@@ -853,6 +980,7 @@ async function save({ as = false } = {}) {
           types: [{ description: 'Text files', accept: { 'text/plain': ['.txt'] } }],
         });
         state.fileName = state.handle.name;
+        state.browserList = null;
       }
       const out = await webEncode(text);
       const w = await state.handle.createWritable();
@@ -1279,6 +1407,11 @@ async function loadAutoSave() {
       return !!m && /^(true|1|yes|on)$/i.test(m[1]);
     };
     state.autoSave = /^\s*autosave\s*=/m.test(cfg) ? flag('autosave') : isAndroid;
+    if (isAndroid && !/^\s*backupdir\s*=/m.test(cfg)) {   // backups (archiving) go to the app folder that file managers can see, not into the private app data
+      const d = storageDirs();
+      const base = (d[1] || d[0] || {}).path;
+      if (base) setCfgNow('backupdir', `${base}/backups`);
+    }
     state.lineNumbers = flag('linenumbers');
     state.davCache = davFast = /^\s*davcache\s*=/m.test(cfg) ? flag('davcache') : true;
     const num = (key, def) => { const m = cfg.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\d+)`, 'm')); return m ? Math.min(90, +m[1]) : def; };
@@ -1917,7 +2050,7 @@ function render() {
   $('#fileName').textContent = state.fileName;
   {
     const dav = isTauri && isRemote(state.path);
-    const kind = dav ? ['cloud', 'WebDAV'] : (isTauri && state.git && state.git.repo ? ['code-branch', 'Git folder'] : ['hard-drive', 'Local file']);
+    const kind = !isTauri && state.browserList ? ['database', 'Browser storage'] : dav ? ['cloud', 'WebDAV'] : (isTauri && state.git && state.git.repo ? ['code-branch', 'Git folder'] : ['hard-drive', 'Local file']);
     const k = $('#fileKind');
     k.className = `fa-solid fa-${kind[0]}`;
     k.title = kind[1];
@@ -1958,7 +2091,8 @@ function render() {
     try { tauri.window.getCurrentWindow().setDecorations(!state.frameless).catch(() => {}); } catch { /* ignore */ }
   }
   $('#archive').disabled = !state.lines.some((l) => T.parse(l).done);
-  $('#backupZip').style.display = isTauri && state.path && !isRemote(state.path) ? '' : 'none';
+  $('#browserStorage').style.display = isTauri ? 'none' : '';
+  $('#backupZip').style.display = isTauri && !isAndroid && state.path && !isRemote(state.path) ? '' : 'none';   // no save dialog on Android: its backups go to the backup folder when archiving
   $('#backupArchiveToggle').style.display = isTauri ? '' : 'none';
   const vt = $('#viewToggle');
   vt.replaceChildren(el('i', { className: 'fa-solid ' + (state.view === 'list' ? 'fa-file-lines' : 'fa-list') }),
@@ -2611,6 +2745,7 @@ $('#keepFile').onclick = async () => {
   renderFileList();
 };
 $('#archive').onclick = archiveDone;
+$('#browserStorage').onclick = browserStorageDialog;
 $('#backupZip').onclick = backupToZip;
 $('#backupArchiveToggle').onclick = async () => {
   const on = !(await invoke('backup_on_archive').catch(() => true));
@@ -2730,6 +2865,7 @@ restore();
 buildThemeMenu();
 render();
 loadVersion();
+if (pendingBrowserList) openBrowserList(pendingBrowserList);
 // height of the add/search bar for the sidebar (it scrolls above the bar instead of under it)
 {
   const form = $('#addForm');

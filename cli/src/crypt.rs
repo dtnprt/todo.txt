@@ -1,4 +1,4 @@
-//! Optional encryption of todo files, notes and the WebDAV offline cache (AES-256-GCM).
+//! EXPERIMENTAL: optional encryption of todo files, notes and the WebDAV offline cache (AES-256-GCM).
 //! Shared by the terminal app and the desktop app (included there via `#[path]`); `web/crypt.js` implements the same format.
 //!
 //! File format (text, so git and WebDAV treat it like any other text file):

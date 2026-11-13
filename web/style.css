@@ -547,3 +547,15 @@ body.noscrollbars .scroll-area::-webkit-scrollbar { display: none; }
 body:not(.android).minimal .composer { left: 252px; right: 31px; }
 body:not(.android).minimal.nosidebar .composer, body:not(.android).minimal .layout.no-side .composer { left: 16px; }
 @media (max-width: 720px) { body:not(.android).minimal .composer { left: 16px; } }
+
+/* experimental features */
+.exp-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--warn); border: 1px solid var(--warn); vertical-align: middle; }
+.exp-note { color: var(--warn); }
+
+/* browser storage dialog */
+.bs-box { width: min(560px, calc(100vw - 32px)); }
+.bs-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
+.bs-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.bs-row .bs-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-row small { color: var(--muted); }
+.bs-row button { padding: 2px 10px; }

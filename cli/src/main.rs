@@ -153,7 +153,7 @@ struct Cli {
     #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = "")]
     webdav_ls: Option<String>,
 
-    /// Encryption (AES-256-GCM): on|off. Converts the open todo file / folder (lists, notes, done.txt) and encrypts every later save; asks for a password
+    /// EXPERIMENTAL encryption (AES-256-GCM): on|off. Converts the open todo file / folder (lists, notes, done.txt) and encrypts every later save; asks for a password
     #[arg(long, value_name = "on|off")]
     encrypt: Option<String>,
 
@@ -299,6 +299,7 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
             }
             cfg.set_other("encrypt", "true");
             cfg.save()?;
+            eprintln!("note: encryption is experimental - keep a backup (todo --backup) of your files. Other todo.txt apps, editors and scripts can no longer read encrypted files");
             println!("encryption on: {n} file(s) encrypted{}", if remote { " (the remote list is encrypted on its next save; its notes stay plain)" } else { "" });
             if !crypt::has_stored_password() {
                 println!("tip: todo --crypt-login keeps the password in the keyring so you are not asked every time");
@@ -882,7 +883,7 @@ fn print_info(cfg: &Config, path: &std::path::Path, folder: Option<&std::path::P
     println!("backups:    {} (before archiving: {})", backup::backup_dir().display(), onoff(Some(backup::archive_backup_enabled()), true));
     println!(
         "encryption: {} · password {} · Windows Hello {}",
-        if crypt::enabled() { "on (AES-256-GCM)" } else { "off" },
+        if crypt::enabled() { "on (AES-256-GCM, experimental)" } else { "off (experimental feature)" },
         if crypt::has_stored_password() { "in the keyring" } else { "not stored (todo --crypt-login)" },
         if crypt::hello_enabled() { if crypt::hello_available() { "on" } else { "on, but not available" } } else { "off" }
     );
