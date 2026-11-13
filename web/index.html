@@ -97,6 +97,7 @@
         <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
         <button type="button" role="tab" data-tab="appearance" aria-selected="false">Appearance</button>
         <button type="button" role="tab" data-tab="themes" aria-selected="false">Themes</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false">About</button>
         <button type="button" role="tab" data-tab="webdav" aria-selected="false" id="davTab" style="display:none">WebDAV</button>
       </div>
       <div class="set-pane" data-pane="general">
@@ -127,6 +128,16 @@
         <div class="theme-foot">
           <div id="themeVariantBox" class="variant-box"></div>
           <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
+        </div>
+      </div>
+      <div class="set-pane" data-pane="about" hidden>
+        <div class="about">
+          <h3>todo.txt</h3>
+          <p class="muted" id="aboutVersion"></p>
+          <p>A todo.txt app for the web, the desktop and the terminal. Your tasks stay in a plain text file.</p>
+          <p><a href="https://dtnprt.github.io/todo.txt" target="_blank" rel="noopener noreferrer">https://dtnprt.github.io/todo.txt</a></p>
+          <p><a href="https://github.com/dtnprt/todo.txt/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">License</a> <span class="muted">(public domain / Unlicense)</span></p>
+          <p><a href="https://github.com/dtnprt/todo.txt" target="_blank" rel="noopener noreferrer">Source code on GitHub</a></p>
         </div>
       </div>
       <div class="set-pane" data-pane="webdav" hidden></div>

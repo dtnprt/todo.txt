@@ -1,6 +1,6 @@
 [package]
 name = "todo-cli"
-version = "0.1.49"
+version = "0.1.50"
 edition = "2021"
 description = "todo.txt command line tool with an interactive terminal UI"
 

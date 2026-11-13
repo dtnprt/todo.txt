@@ -1690,6 +1690,7 @@ function render() {
   $('#sideBtn').disabled = !listMode;
   $('#sideBtn').classList.toggle('active', state.sidebar);
   $('#status').hidden = !listMode;
+  $('#aboutVersion').textContent = appVersion ? `Version ${appVersion}` : '';
   document.title = state.fileName + (state.dirty ? '*' : '') + ' – todo.txt' + (appVersion ? `  v${appVersion}` : '');
   if (isTauri && tauri.window) {
     try { tauri.window.getCurrentWindow().setTitle(document.title).catch(() => {}); } catch { /* ignore */ }
@@ -2481,3 +2482,11 @@ if (isAndroid) {
 
 openLastFile();
 loadAutoSave();
+
+// Desktop: links (task URLs, About page) open in the system browser instead of inside the app window.
+document.addEventListener('click', (e) => {
+  const a = e.target instanceof Element ? e.target.closest('a[href^="http"]') : null;
+  if (!a || !isTauri || !tauri.opener) return;
+  e.preventDefault();
+  tauri.opener.openUrl(a.href).catch(() => {});
+});

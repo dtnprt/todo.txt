@@ -591,6 +591,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .on_window_event(|_window, _event| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let tauri::WindowEvent::Moved(_)

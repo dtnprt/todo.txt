@@ -492,16 +492,19 @@ body:not(.android) .sidebar { position: static; align-self: stretch; max-height:
 body:not(.android) .composer { position: relative; bottom: auto; }
 body:not(.android).minimal .composer { position: fixed; bottom: 0; }
 body:not(.android).minimal .sidebar { top: auto; max-height: none; }
-/* minimal mode: the input bar floats over the bottom of the window. The scroll area (#listWrap) fills the whole height
-   and ends in free space as high as the bar ("invisible entry"), so the last entry can be scrolled clear of it. */
-body:not(.android).minimal #listWrap { padding-bottom: calc(var(--composer-h, 76px) + 8px); box-sizing: border-box; }
+/* minimal mode: the input bar floats over the bottom of the window. The list keeps its fixed rounded frame with the same
+   16px margin below as above; inside it ends in free space ("invisible entry") as high as the part of the bar that overlaps
+   the list, so the last entry can be scrolled clear of the bar. */
+body:not(.android).minimal .layout { padding-bottom: 16px; }
+body:not(.android).minimal #list { padding-bottom: calc(var(--composer-h, 76px) - 8px); }
+body:not(.android).minimal .tasks > .task:last-child { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
 
 /* Normal mode: the framed list itself is the scroll container (frame and rounded corners stay in place) */
-body:not(.android):not(.minimal) #listWrap { display: contents; }
-body:not(.android):not(.minimal) #list { grid-column: 2; grid-row: 1; align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-body:not(.android):not(.minimal) .layout.no-side #list { grid-column: 1; }
-@media (max-width: 720px) { body:not(.android):not(.minimal) .layout #list { grid-column: 1; } }
+body:not(.android) #listWrap { display: contents; }
+body:not(.android) #list { grid-column: 2; grid-row: 1; align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+body:not(.android) .layout.no-side #list { grid-column: 1; }
+@media (max-width: 720px) { body:not(.android) .layout #list { grid-column: 1; } }
 
 /* Scrollbars (list, text view, sidebar): thin, themed, visible while hovering the area or scrolling; Settings -> View -> Scrollbars turns them off */
 body:not(.android) .scroll-area::-webkit-scrollbar { width: 12px; height: 12px; }
@@ -520,6 +523,9 @@ body.noscrollbars .scroll-area::-webkit-scrollbar { display: none; }
 .paste-q { font-size: 14px; }
 .paste-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
-/* minimal mode: the list frame scrolls with the entries, so the visible area is clipped to rounded corners (theme token --list-radius) */
-:root { --list-radius: 8px; }
-body:not(.android).minimal #listWrap { clip-path: inset(0 round var(--list-radius)); }
+/* About page */
+.about { padding: 8px 4px; display: flex; flex-direction: column; gap: 10px; }
+.about h3 { margin: 0; font-size: 22px; }
+.about p { margin: 0; }
+.about .muted { color: var(--muted); }
+.about a { color: var(--accent); }
