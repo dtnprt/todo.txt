@@ -177,6 +177,14 @@ struct Cli {
     #[arg(long, value_name = "FILE.zip", num_args = 0..=1, default_missing_value = "")]
     backup: Option<String>,
 
+    /// Encryption of THIS list only: on|off (an exception in the `.todotxt.cfg` of its folder, e.g. to keep one list readable by other apps); converts the file
+    #[arg(long, value_name = "on|off")]
+    encrypt_file: Option<String>,
+
+    /// List the known files (`files=`) with their kind (cloud / git / local) and whether they are encrypted
+    #[arg(long)]
+    files: bool,
+
     /// With -f: remember the file (default + known files) even if it is outside the folder of the remembered one
     #[arg(short = 'K', long)]
     keep: bool,
@@ -194,8 +202,27 @@ struct Cli {
     words: Vec<String>,
 }
 
+/// Is this file one the CLI may switch to on its own (see `lastfile=`)?
+fn is_known(cfg: &Config, p: &std::path::Path) -> bool {
+    let norm = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+    webdav::is_remote(&p.to_string_lossy())
+        || cfg.files.iter().any(|f| norm(f) == norm(p))
+        || cfg.file.as_ref().is_some_and(|f| norm(f) == norm(p))
+        || cfg.folder.as_ref().is_some_and(|d| folder::is_inside(d, p))
+}
+
+/// ("cloud" | "git" | "local", encrypted?) of a known file.
+fn file_kind(p: &std::path::Path) -> (&'static str, Option<bool>) {
+    let t = p.to_string_lossy();
+    if webdav::is_remote(&t) {
+        return ("cloud", davcache::cached_encrypted(&t));
+    }
+    let git = p.parent().is_some_and(|d| d.join(".git").exists());
+    (if git { "git" } else { "local" }, crypt::file_state(p))
+}
+
 fn crypt_switches(cli: &Cli) -> bool {
-    cli.encrypt.is_some() || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
+    cli.encrypt.is_some() || cli.encrypt_file.is_some() || cli.files || cli.crypt_login || cli.crypt_logout || cli.crypt_passwd || cli.crypt_hello.is_some()
 }
 
 fn parse_on_off(name: &str, v: &str) -> Result<bool, String> {
@@ -284,6 +311,67 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
         crypt::set_session(Some(new));
         println!("password changed ({n} file(s) re-encrypted)");
     }
+    if cli.files {
+        let mut all: Vec<PathBuf> = cfg.files.clone();
+        if let Some(f) = &cfg.file {
+            if !all.contains(f) {
+                all.push(f.clone());
+            }
+        }
+        for p in all {
+            let (kind, enc) = file_kind(&p);
+            let state = match enc {
+                Some(true) => "encrypted",
+                Some(false) => "plain",
+                None => "?",
+            };
+            println!("{kind:<6} {state:<9} {}{}", p.display(), if p == path { "   <- current" } else { "" });
+        }
+    }
+    // the folder (or, for a single file, its directory / the server folder) that holds the policy file `.todotxt.cfg`
+    let set_dir_policy = |on: bool| -> Result<(), Box<dyn Error>> {
+        let target: Option<String> = match folder {
+            Some(d) if folder::is_remote_dir(d) => Some(d.to_string_lossy().into_owned()),
+            Some(d) => {
+                crypt::set_dir_policy(d, on)?;
+                None
+            }
+            None if remote => Some(webdav::parent(&path.to_string_lossy())),
+            None => {
+                if let Some(d) = path.parent() {
+                    crypt::set_dir_policy(d, on)?;
+                }
+                None
+            }
+        };
+        if let Some(url) = target {
+            let server = store::server_of(std::path::Path::new(&url))?;
+            let mut p = webdav::remote_policy(&server, &url);
+            p.set_default(on);
+            webdav::write_remote_policy(&server, &url, &p).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    };
+    if let Some(v) = &cli.encrypt_file {
+        let on = parse_on_off("--encrypt-file", v)?;
+        let pw = match crypt::resolve_password() {
+            Ok(p) => p,
+            Err(_) if on => new_password("encryption")?,
+            Err(_) => current_password()?,
+        };
+        crypt::set_session(Some(pw.clone()));
+        if remote {
+            let server = store::server_of(path)?;
+            let text = store::Store::load(path)?;
+            webdav::set_remote_file_policy(&server, &path.to_string_lossy(), on).map_err(|e| e.to_string())?;
+            text.save(path)?;
+        } else {
+            crypt::set_file_policy(path, on)?;
+            if on { crypt::convert_file(path, Some(&pw), Some(&pw))?; } else { crypt::convert_file(path, Some(&pw), None)?; }
+        }
+        eprintln!("note: encryption is experimental - keep a backup (todo --backup)");
+        println!("{}: {}", path.display(), if on { "encrypted" } else { "stored as plain text (readable by other apps)" });
+    }
     if let Some(v) = &cli.encrypt {
         let on = parse_on_off("--encrypt", v)?;
         if on {
@@ -293,6 +381,7 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
             };
             crypt::set_session(Some(pw.clone()));
             crypt::set_enabled_override(Some(true));
+            set_dir_policy(true)?;
             let n = convert(Some(&pw), Some(&pw))?;
             if remote {
                 store::Store::load(path)?.save(path)?;
@@ -308,6 +397,7 @@ fn crypt_cmds(cli: &Cli, cfg: &mut Config, path: &std::path::Path, folder: Optio
             let pw = current_password()?;
             crypt::set_session(Some(pw.clone()));
             crypt::set_enabled_override(Some(false));
+            set_dir_policy(false)?;
             let n = convert(Some(&pw), None)?;
             if remote {
                 store::Store::load(path)?.save(path)?;
@@ -451,7 +541,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     // folder mode: `-f FOLDER`, or `folder=` in the config; otherwise a single file
     let mut folder: Option<PathBuf> = None;
     // the file used last (any client) wins over `file=` at start; `file=` stays the remembered default
-    let last = cfg.lastfile.clone().or_else(|| cfg.file.clone());
+    // `lastfile=` is the file the other clients switched to: a WebDAV file is always followed, a local / git file only when it is
+    // in the list of known files (Settings -> Known files, `todo --files`), in the folder, or the remembered `file=`
+    let last = cfg.lastfile.clone().filter(|l| is_known(&cfg, l)).or_else(|| cfg.file.clone());
     let last_is_remote = last.as_ref().is_some_and(|f| webdav::is_remote(&f.to_string_lossy()));
     let last_outside_folder = match (&cfg.folder, &last) {
         (Some(d), Some(l)) => folder::is_folder(d) && !folder::is_inside(d, l) && (last_is_remote || l.exists()),

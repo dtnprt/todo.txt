@@ -411,20 +411,172 @@ pub fn seal_if_enabled(text: &str) -> Result<String, Error> {
     seal(text, &pw)
 }
 
-/// Like `seal_if_enabled` for a local file: a file that is encrypted on disk stays encrypted when it is overwritten, even if
-/// `encrypt=` is off (turning encryption off is done explicitly, which decrypts the files: `todo --encrypt off`).
+/// The text to write to the local file `path`: encrypted according to the folder policy (`.todotxt.cfg`), else the global
+/// setting; an encrypted file without a policy stays encrypted.
 pub fn seal_for_path(path: &Path, text: &str) -> Result<String, Error> {
-    let keep = !enabled()
-        && std::fs::File::open(path).ok().is_some_and(|mut f| {
-            use std::io::Read;
-            let mut head = [0u8; 13];
-            f.read_exact(&mut head).is_ok() && head.starts_with(MAGIC.as_bytes()) && head[12] == b' '
-        });
-    if enabled() || keep {
+    if want_encrypt(path) {
         let pw = resolve_password()?;
         seal(text, &pw)
     } else {
         Ok(text.to_string())
+    }
+}
+
+// ---------- per-folder policy: `.todotxt.cfg` ----------
+// A hidden file in every folder that holds known lists (also on a WebDAV server) says what is encrypted there:
+//   encrypt=true|false     default for the lists, notes and images of this folder
+//   plain=a.txt,b.txt      lists that are NOT encrypted although the default is true (readable by other todo.txt apps)
+//   encrypted=c.txt        lists that ARE encrypted although the default is false
+// Without the file (or without a `encrypt=` line) the global `encrypt=` of `todo.cfg` decides, and an encrypted file stays encrypted.
+
+pub const DIR_CFG: &str = ".todotxt.cfg";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Policy {
+    pub default: Option<bool>,
+    pub plain: Vec<String>,
+    pub encrypted: Vec<String>,
+}
+
+fn parse_bool(v: &str) -> Option<bool> {
+    match v.trim().to_lowercase().as_str() {
+        "true" | "on" | "1" | "yes" => Some(true),
+        "false" | "off" | "0" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+fn names(v: &str) -> Vec<String> {
+    v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+impl Policy {
+    pub fn parse(text: &str) -> Policy {
+        let mut p = Policy::default();
+        for line in text.lines() {
+            let Some((k, v)) = line.split_once('=') else { continue };
+            match k.trim() {
+                "encrypt" => p.default = parse_bool(v),
+                "plain" => p.plain = names(v),
+                "encrypted" => p.encrypted = names(v),
+                _ => {}
+            }
+        }
+        p
+    }
+
+    pub fn render(&self) -> String {
+        let mut out = String::from("# todo.txt folder settings: what is encrypted here (see cli/src/crypt.rs)\n");
+        if let Some(d) = self.default {
+            out.push_str(&format!("encrypt={d}\n"));
+        }
+        if !self.plain.is_empty() {
+            out.push_str(&format!("plain={}\n", self.plain.join(",")));
+        }
+        if !self.encrypted.is_empty() {
+            out.push_str(&format!("encrypted={}\n", self.encrypted.join(",")));
+        }
+        out
+    }
+
+    /// Should the list `name` be encrypted? None = this folder has no opinion.
+    pub fn decide(&self, name: &str) -> Option<bool> {
+        let same = |l: &Vec<String>| l.iter().any(|n| n.eq_ignore_ascii_case(name));
+        if same(&self.plain) {
+            Some(false)
+        } else if same(&self.encrypted) {
+            Some(true)
+        } else {
+            self.default
+        }
+    }
+
+    /// Record that `name` is (not) encrypted: an exception to the default, or no entry when it matches the default.
+    pub fn set_file(&mut self, name: &str, encrypt: bool) {
+        self.plain.retain(|n| !n.eq_ignore_ascii_case(name));
+        self.encrypted.retain(|n| !n.eq_ignore_ascii_case(name));
+        match self.default {
+            None => {
+                self.default = Some(encrypt);
+            }
+            Some(d) if d != encrypt => {
+                if encrypt { self.encrypted.push(name.to_string()) } else { self.plain.push(name.to_string()) }
+            }
+            _ => {}
+        }
+    }
+
+    /// New default for the whole folder; the exceptions are dropped.
+    pub fn set_default(&mut self, encrypt: bool) {
+        self.default = Some(encrypt);
+        self.plain.clear();
+        self.encrypted.clear();
+    }
+}
+
+/// The policy file of a local folder (empty policy when there is none).
+pub fn policy_of_dir(dir: &Path) -> Policy {
+    std::fs::read_to_string(dir.join(DIR_CFG)).map(|t| Policy::parse(&t)).unwrap_or_default()
+}
+
+pub fn write_policy(dir: &Path, p: &Policy) -> std::io::Result<()> {
+    std::fs::write(dir.join(DIR_CFG), p.render())
+}
+
+/// Does the folder (a local path) have a policy file with a default?
+pub fn has_policy(dir: &Path) -> bool {
+    policy_of_dir(dir).default.is_some()
+}
+
+/// What the policy files say about a local file: lists use the exceptions of their folder; notes (`notes/`) and images
+/// (`images/`) use the default of the folder above. None = no opinion.
+pub fn policy_for_path(path: &Path) -> Option<bool> {
+    let dir = path.parent()?;
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let dirname = dir.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if matches!(dirname.as_str(), "notes" | "images") {
+        if let Some(up) = dir.parent() {
+            if let Some(d) = policy_of_dir(up).default {
+                return Some(d);
+            }
+        }
+    }
+    policy_of_dir(dir).decide(&name)
+}
+
+/// Record the encryption choice for one local list (creates `.todotxt.cfg` with this choice as the default if needed).
+pub fn set_file_policy(path: &Path, encrypt: bool) -> std::io::Result<()> {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Ok(()) };
+    let mut p = policy_of_dir(dir);
+    p.set_file(&name.to_string_lossy(), encrypt);
+    write_policy(dir, &p)
+}
+
+/// Set the default of a local folder (and drop its exceptions).
+pub fn set_dir_policy(dir: &Path, encrypt: bool) -> std::io::Result<()> {
+    let mut p = policy_of_dir(dir);
+    p.set_default(encrypt);
+    write_policy(dir, &p)
+}
+
+fn file_is_encrypted(path: &Path) -> Option<bool> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 13];
+    let n = f.read(&mut head).ok()?;
+    Some(n == 13 && head.starts_with(MAGIC.as_bytes()) && head[12] == b' ')
+}
+
+/// Is this local file encrypted on disk right now? None = the file does not exist / cannot be read.
+pub fn file_state(path: &Path) -> Option<bool> {
+    file_is_encrypted(path)
+}
+
+/// Encrypt what is written to `path`? Policy file first, then the global setting; without a policy an encrypted file stays so.
+fn want_encrypt(path: &Path) -> bool {
+    match policy_for_path(path) {
+        Some(w) => w,
+        None => enabled() || file_is_encrypted(path) == Some(true),
     }
 }
 
@@ -482,8 +634,7 @@ pub fn read_file_auto(path: &Path) -> Result<Vec<u8>, Error> {
 
 /// Bytes to write to `path` (images): encrypted when encryption is on or the file is already encrypted.
 pub fn seal_bytes_for_path(path: &Path, data: &[u8]) -> Result<Vec<u8>, Error> {
-    let keep = !enabled() && std::fs::read(path).ok().is_some_and(|b| is_encrypted_bytes(&b[..b.len().min(16)]));
-    if enabled() || keep {
+    if want_encrypt(path) {
         let pw = resolve_password()?;
         Ok(seal_bytes(data, &pw)?.into_bytes())
     } else {
@@ -575,6 +726,42 @@ mod tests {
         let s = seal_with_salt(b"hello todo.txt\n", "pw", &[7u8; 16], 1000).unwrap();
         assert_eq!(open_with(&s, "pw").unwrap(), "hello todo.txt\n");
         assert!(s.starts_with(&format!("{MAGIC} {KDF} 1000 {} ", B64.encode([7u8; 16]))));
+    }
+
+    #[test]
+    fn folder_policy() {
+        let p = Policy::parse("# x\nencrypt=true\nplain=shared.txt, other.txt\n");
+        assert_eq!(p.default, Some(true));
+        assert_eq!(p.decide("todo.txt"), Some(true));
+        assert_eq!(p.decide("Shared.txt"), Some(false));
+        let mut q = Policy::default();
+        assert_eq!(q.decide("a.txt"), None);
+        q.set_file("a.txt", true); // first choice becomes the folder default
+        assert_eq!(q.default, Some(true));
+        q.set_file("b.txt", false);
+        assert_eq!((q.decide("a.txt"), q.decide("b.txt")), (Some(true), Some(false)));
+        q.set_file("b.txt", true); // back to the default: no exception left
+        assert!(q.plain.is_empty() && q.encrypted.is_empty());
+        assert_eq!(Policy::parse(&p.render()), p);
+        q.set_default(false);
+        assert_eq!(q.decide("a.txt"), Some(false));
+    }
+
+    #[test]
+    fn policy_decides_what_is_written() {
+        let dir = std::env::temp_dir().join(format!("todo-policy-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        set_session(Some("pw".into()));
+        write_policy(&dir, &Policy::parse("encrypt=true\nplain=open.txt\n")).unwrap();
+        assert!(is_encrypted(&seal_for_path(&dir.join("secret.txt"), "x\n").unwrap()));
+        assert_eq!(seal_for_path(&dir.join("open.txt"), "x\n").unwrap(), "x\n");
+        assert!(is_encrypted(&seal_for_path(&dir.join("notes").join("n.txt"), "x\n").unwrap())); // notes follow the default
+        write_policy(&dir, &Policy::parse("encrypt=false\nencrypted=secret.txt\n")).unwrap();
+        assert!(is_encrypted(&seal_for_path(&dir.join("secret.txt"), "x\n").unwrap()));
+        assert_eq!(seal_for_path(&dir.join("other.txt"), "x\n").unwrap(), "x\n");
+        set_session(None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

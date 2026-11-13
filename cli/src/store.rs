@@ -28,6 +28,22 @@ pub fn prompt_password(message: &str) -> Option<String> {
 }
 
 /// Run `f`; if it fails because a password is needed, ask for it (up to three times) and try again.
+/// A new file is being created: ask whether it is encrypted (default = what the folder policy / the global setting says) and
+/// remember the answer in the `.todotxt.cfg` of its folder. No terminal / no prompting: nothing is asked.
+fn ask_encrypt_new(default: bool) -> Option<bool> {
+    if !CAN_PROMPT.load(Ordering::Relaxed) || !io::stdin().is_terminal() {
+        return None;
+    }
+    eprint!("Encrypt this new file? (experimental; other todo.txt apps cannot read encrypted files) [{}] ", if default { "Y/n" } else { "y/N" });
+    let mut line = String::new();
+    io::stdin().read_line(&mut line).ok()?;
+    Some(match line.trim().to_lowercase().as_str() {
+        "y" | "yes" | "j" | "ja" => true,
+        "n" | "no" | "nein" => false,
+        _ => default,
+    })
+}
+
 pub fn with_unlock<T>(f: impl Fn() -> io::Result<T>) -> io::Result<T> {
     let mut attempts = 0;
     loop {
@@ -104,6 +120,14 @@ impl Store {
     fn save_once(&self, path: &Path) -> io::Result<()> {
         if webdav::is_remote(&path.to_string_lossy()) {
             let server = server_of(path)?;
+            if self.etag.borrow().is_none() {
+                // no ETag = the file does not exist on the server yet
+                let url = path.to_string_lossy().into_owned();
+                let default = webdav::remote_want(&server, &url).unwrap_or_else(crate::crypt::enabled);
+                if let Some(enc) = ask_encrypt_new(default) {
+                    let _ = webdav::set_remote_file_policy(&server, &url, enc);
+                }
+            }
             let r = crate::davcache::put(&server, &path.to_string_lossy(), &self.text(), self.etag.borrow().as_deref()).map_err(other)?;
             *self.etag.borrow_mut() = r.etag;
             return Ok(());
@@ -137,6 +161,15 @@ pub fn render(lines: &[String], crlf: bool) -> String {
 }
 
 pub fn save_lines(path: &Path, lines: &[String], crlf: bool) -> io::Result<()> {
+    if !path.exists() {
+        let default = crate::crypt::policy_for_path(path).unwrap_or_else(crate::crypt::enabled);
+        if let Some(enc) = ask_encrypt_new(default) {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = crate::crypt::set_file_policy(path, enc);
+        }
+    }
     let out = crate::crypt::seal_for_path(path, &render(lines, crlf)).map_err(io::Error::from)?;
     if let Some(dir) = path.parent() {
         if !dir.as_os_str().is_empty() {

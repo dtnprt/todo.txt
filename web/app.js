@@ -46,6 +46,7 @@ const THEME_FAMILIES = {
   gruvbox: [['Dark', 'gruvbox-dark'], ['Light', 'gruvbox-light']],
   cupertino: [['Light', 'cupertino-light'], ['Dark', 'cupertino-dark'], ['9', 'cupertino-9'], ['X', 'cupertino-x']],
   terminal: [['Green', 'terminal-green'], ['Amber', 'terminal-amber'], ['White', 'terminal-white'], ['Hacker', 'terminal-hacker'], ['Pip-Boy', 'terminal-pipboy']],
+  redmond: [['95', 'redmond-95'], ['XP', 'redmond-xp'], ['7', 'redmond-7']],
   accessibility: [['Colorblind', 'accessibility-colorblind'], ['High contrast', 'accessibility-high-contrast']],
 };
 /** family key of a theme value ('nord-light' -> 'nord', 'user:x-dark' -> 'user:x', else the value itself) */
@@ -167,7 +168,7 @@ function restore() {
     if (typeof s.cornerName === 'boolean') state.cornerName = s.cornerName;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
     {   // renamed / merged themes (also the `user:` form used by the desktop app)
-      const RENAMED = { ghibli: 'hauro', mario: 'plumber', windows95: 'redmond', 'macos-light': 'cupertino-light', 'macos-dark': 'cupertino-dark', hacker: 'terminal-hacker', pipboy: 'terminal-pipboy', colorblind: 'accessibility-colorblind', 'high-contrast': 'accessibility-high-contrast' };
+      const RENAMED = { ghibli: 'hauro', mario: 'plumber', windows95: 'redmond-95', redmond: 'redmond-95', 'macos-light': 'cupertino-light', 'macos-dark': 'cupertino-dark', hacker: 'terminal-hacker', pipboy: 'terminal-pipboy', colorblind: 'accessibility-colorblind', 'high-contrast': 'accessibility-high-contrast' };
       const bare = String(s.theme || '').replace(/^user:/, '');
       if (RENAMED[bare]) s.theme = 'user:' + RENAMED[bare];
     }
@@ -273,6 +274,7 @@ async function readAny(p) {
 }
 /** Write a local or WebDAV file; for WebDAV the new ETag is remembered. */
 async function writeAny(p, text) {
+  await beforeFirstWrite(p);
   if (!isRemote(p)) return writeLocal(p, text);
   const entry = davEntry(p);
   if (!entry) throw new Error('No WebDAV server is configured for this address (Settings → WebDAV).');
@@ -314,8 +316,9 @@ function loadText(text, name, handle = null, path = null, etag = null) {
   state.browserList = null;   // openBrowserList sets it again
   state.handle = handle;
   // shared with the CLI/TUI: they follow the file chosen here - but not a file from a folder unknown to them
-  if (isTauri && path && path !== state.path) isKnownFile(path).then((k) => { if (k) setCfg('lastfile', path); });
+  if (isTauri && path && path !== state.path) isKnownFile(path).then((k) => { if (k) { lastSeenLast = path; setCfg('lastfile', path); } });
   state.path = path;
+  if (path) seenFiles.add(path);
   diskText = path || handle ? text : null;
   state.dirty = false;
   state.editing = null;
@@ -630,6 +633,10 @@ async function setEncryption(on) {
     }
     await invoke('crypt_set_enabled', { on });
     await setCfgNow('encrypt', on);
+    {   // the folder of the open file gets the default too (`.todotxt.cfg`), single files can differ (Settings -> Known files)
+      const dir = state.folder || (state.path ? (isRemote(state.path) ? davParent(state.path) : dirOf(state.path)) : null);
+      if (dir) await invoke('crypt_set_dir', { dir, entry: isRemote(dir) ? davEntry(isRemote(state.path || '') ? state.path : dir) : null, encrypt: on });
+    }
     const t = cryptTargets();
     const n = await invoke('crypt_convert', { folder: t.folder, files: t.files, encrypt: on, newPassword: null });
     // a WebDAV list is not converted on disk: write it again so it is stored in the new form
@@ -690,6 +697,136 @@ $('#encHello').onclick = async () => {
   refreshSecurity();
 };
 $('#encLock').onclick = async () => { if (isTauri) await invoke('crypt_lock'); else C.setSession(null); refreshSecurity(); };
+
+
+// ---------- known files: cloud / git / local, encryption state ----------
+// The file menu and Settings -> Known files list every known file with the icon of where it lives. `file_info` (Rust) tells the
+// kind (WebDAV = cloud, folder with `.git` = git, else local) and whether the list is stored encrypted.
+const KIND_ICON = { cloud: 'cloud', git: 'code-branch', local: 'hard-drive' };
+const KIND_LABEL = { cloud: 'Cloud (WebDAV)', git: 'Git folder', local: 'Local file' };
+let fileInfo = {};          // path -> {kind, encrypted, exists}
+let fileInfoKey = '';
+let fileInfoAt = 0;
+const kindOf = (p) => (fileInfo[p] && fileInfo[p].kind) || (isRemote(p) ? 'cloud' : 'local');
+const knownPaths = () => {
+  const f = [...state.files];
+  if (state.path && !f.includes(state.path)) f.push(state.path);
+  return f;
+};
+
+async function refreshFileInfo(force = false) {
+  if (!isTauri || isAndroid) return;
+  const paths = knownPaths();
+  const key = paths.join('\n');
+  if (!force && key === fileInfoKey && Date.now() - fileInfoAt < 10000) return;
+  fileInfoKey = key;
+  fileInfoAt = Date.now();
+  try {
+    const list = await invoke('file_info', { paths });
+    const next = Object.fromEntries(list.map((i) => [i.path, i]));
+    if (JSON.stringify(next) !== JSON.stringify(fileInfo)) { fileInfo = next; renderFileList(); renderKnownFiles(); }
+  } catch { /* keep what we know */ }
+}
+
+const encBadge = (p) => {
+  const e = fileInfo[p] && fileInfo[p].encrypted;
+  return e === true ? ['encrypted', 'lock'] : e === false ? ['plain text', 'lock-open'] : ['unknown', 'circle-question'];
+};
+
+function renderKnownFiles() {
+  const box = document.getElementById('knownFiles');
+  if (!box || !isTauri) return;
+  const paths = knownPaths();
+  if (!paths.length) { box.replaceChildren(el('span', { className: 'set-hint', textContent: 'No known files yet. Open a file and add it here, or use Add file…' })); return; }
+  const rows = [];
+  for (const k of ['cloud', 'git', 'local']) {
+    const list = paths.filter((p) => kindOf(p) === k);
+    if (!list.length) continue;
+    if (rows.length) rows.push(el('hr'));
+    for (const p of list) {
+      const [label, icon] = encBadge(p);
+      const info = fileInfo[p] || {};
+      const cur = p === state.path;
+      rows.push(el('div', { className: 'kf-row' + (cur ? ' current' : '') },
+        el('i', { className: `fa-solid fa-${KIND_ICON[k]} kf-kind`, title: KIND_LABEL[k] }),
+        el('span', { className: 'kf-name', title: p }, el('b', { textContent: isRemote(p) ? davName(p) : baseName(p) }), el('small', { textContent: isRemote(p) ? p : dirOf(p) })),
+        el('span', { className: 'kf-enc' + (info.encrypted ? ' on' : ''), title: label }, el('i', { className: `fa-solid fa-${icon}` }), ' ', label),
+        el('button', { type: 'button', textContent: info.encrypted ? 'Decrypt' : 'Encrypt', title: info.encrypted ? 'Store this file as plain text (other apps can read it)' : 'Store this file encrypted (experimental)', disabled: info.exists === false, onclick: () => setFileEncryption(p, !info.encrypted) }),
+        el('button', { type: 'button', textContent: 'Open', disabled: cur, onclick: async () => { await switchFile(p); closeSettings(); } }),
+        el('button', { type: 'button', textContent: 'Remove', title: 'Remove from the list of known files (the file stays untouched)', onclick: () => { removeFromFiles(p); renderKnownFiles(); } })));
+    }
+  }
+  box.replaceChildren(...rows);
+}
+
+/** Encrypt / decrypt one file (an exception in the `.todotxt.cfg` of its folder) and rewrite it now. */
+async function setFileEncryption(p, on) {
+  if (on && !confirm('Encryption is EXPERIMENTAL. Encrypted files can no longer be read by other todo.txt apps, editors or scripts. Keep a backup.\n\nEncrypt this file?')) return;
+  const entry = isRemote(p) ? davEntry(p) : null;
+  try {
+    if (on && !(await invoke('crypt_status')).unlocked) {
+      const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password (or enter the one you already use). There is no way to recover it.', confirm: !(await invoke('crypt_status')).stored });
+      if (!a) return;
+      await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+      if (a.remember) await invoke('crypt_remember');
+    }
+    await withUnlock(() => invoke('crypt_set_file', { path: p, entry, encrypt: on, convert: true }));
+    if (isRemote(p) && p === state.path) { state.dirty = true; await save(); }   // a remote list is written again in the new form
+  } catch (e) { alert(`Could not change the encryption of this file: ${e}`); }
+  refreshFileInfo(true);
+}
+
+/** Two-button question; resolves true / false, or null when cancelled. */
+function askChoice({ title, message, yes, no, defaultYes }) {
+  return new Promise((resolve) => {
+    const done = (v) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+    const bYes = el('button', { type: 'button', className: defaultYes ? 'primary' : '', textContent: yes, onclick: () => done(true) });
+    const bNo = el('button', { type: 'button', className: defaultYes ? '' : 'primary', textContent: no, onclick: () => done(false) });
+    const ov = el('div', { className: 'help' },
+      el('div', { className: 'help-box pw-box', role: 'dialog', 'aria-label': title },
+        el('h2', { textContent: title }), el('p', { textContent: message }),
+        el('div', { className: 'pw-actions' }, bYes, bNo)));
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(ov);
+    (defaultYes ? bYes : bNo).focus();
+  });
+}
+
+const seenFiles = new Set();   // paths known to exist (read or written): a write to any other path creates a NEW file
+
+/** A new list is about to be written for the first time: ask whether it is encrypted; the answer is stored in the `.todotxt.cfg` of its folder. */
+async function askEncryptNew(path) {
+  if (!isTauri || isAndroid) return;
+  const entry = isRemote(path) ? davEntry(path) : null;
+  let def = null;
+  try { def = await invoke('crypt_policy_for', { path, entry }); } catch { /* no policy */ }
+  let st = {};
+  try { st = await invoke('crypt_status'); } catch { /* ignore */ }
+  if (def === null) def = !!st.enabled;
+  const yes = await askChoice({
+    title: 'Encrypt this new file?',
+    message: `${path}\n\nEncryption is experimental. Encrypted files can no longer be read by other todo.txt apps, editors or scripts; plain files can. The answer is stored in the hidden .todotxt.cfg of the folder.`,
+    yes: 'Encrypt', no: 'Keep readable (plain text)', defaultYes: def,
+  });
+  const enc = yes === null ? def : yes;
+  if (enc && !st.unlocked) {
+    const a = await askPassword({ title: 'Encrypt files', message: 'Choose a password (or enter the one you already use). There is no way to recover it.', confirm: !st.stored });
+    if (!a) throw Object.assign(new Error('not saved'), { name: 'AbortError' });
+    await invoke('crypt_unlock', { password: a.useStored ? null : a.password });
+    if (a.remember) await invoke('crypt_remember');
+  }
+  await invoke('crypt_set_file', { path, entry, encrypt: enc, convert: false });
+}
+
+async function beforeFirstWrite(path) {
+  if (!isTauri || isAndroid || seenFiles.has(path)) return;
+  let exists = true;
+  if (!isRemote(path)) { try { exists = await tauri.fs.exists(path); } catch { exists = true; } }
+  else exists = davEtag !== null;   // an ETag means the server has it
+  seenFiles.add(path);
+  if (!exists) await askEncryptNew(path);
+}
 
 // ---------- file I/O ----------
 
@@ -1207,6 +1344,7 @@ async function checkExternalChange(manual = false) {
 }
 /** The terminal app (or the CLI) switched to another known file: open it here too (not with unsaved changes). */
 let followBusy = false;
+let lastSeenLast = null;   // the `lastfile=` value this window last saw or wrote
 async function followLastFile() {
   if (!isTauri || followBusy || state.dirty || state.editing !== null) return;
   followBusy = true;
@@ -1215,7 +1353,11 @@ async function followLastFile() {
     const get = (k) => (cfg.match(new RegExp(`^\\s*${k}\\s*=\\s*(.+?)\\s*$`, 'm')) || [])[1];
     const norm = (x) => (x || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     const last = get('lastfile');
-    if (!last || norm(last) === norm(state.path)) return;
+    if (!last) return;
+    if (lastSeenLast === null) lastSeenLast = last;                   // baseline: what the config says when we first look
+    if (norm(last) === norm(lastSeenLast)) return;                     // nobody else switched: do not pull us back from a file we opened ourselves
+    lastSeenLast = last;
+    if (norm(last) === norm(state.path)) return;
     let files = [];
     try { files = JSON.parse(get('files') || '[]'); } catch { /* ignore */ }
     const folder = get('folder');
@@ -1295,6 +1437,7 @@ async function rememberFile(path, force = false) {
     if (last && dirOf(last) !== dirOf(path)) return;
   }
   setCfg('file', path);
+  lastSeenLast = path;
   setCfg('lastfile', path);
   if (!state.files.includes(path)) {
     state.files.push(path);
@@ -1330,6 +1473,7 @@ const dav = createWebdav({
   },
 });
 
+const davHost = (u) => { try { return new URL(u).host; } catch { return ''; } };
 const davFileName = (p) => (isRemote(p) ? davName(p) : baseName(p));
 
 async function switchFile(p) {
@@ -1369,19 +1513,32 @@ function renderFileList() {
     }
     if (!state.folderFiles.length) rows.push(el('div', { className: 'side-empty' }, 'No .txt files'));
   } else if (isTauri) {
-    const files = state.path && !state.files.includes(state.path) ? [...state.files, state.path] : state.files;
-    rows = files.map((p) => {
+    // cloud, git and local files, separated by lines; every entry carries the icon of where it lives
+    const files = knownPaths();
+    const fileRow = (p) => {
       const cur = p === state.path;
-      const dir = p.slice(0, Math.max(0, p.length - baseName(p).length)).replace(/[\\/]+$/, '');
-      const pick = el('button', { className: 'file-pick', title: p, onclick: () => switchFile(p) },
-        tick(), baseName(p), el('small', {}, baseName(dir)));
+      const k = kindOf(p);
+      const info = fileInfo[p] || {};
+      const dir = isRemote(p) ? '' : p.slice(0, Math.max(0, p.length - baseName(p).length)).replace(/[\\/]+$/, '');
+      const pick = el('button', { className: 'file-pick', title: `${KIND_LABEL[k]}: ${p}`, onclick: () => switchFile(p) },
+        tick(), el('i', { className: `fa-solid fa-${KIND_ICON[k]} file-kind`, title: KIND_LABEL[k] }),
+        isRemote(p) ? davName(p) : baseName(p),
+        ...(info.encrypted ? [el('i', { className: 'fa-solid fa-lock file-enc', title: 'Encrypted' })] : []),
+        el('small', {}, isRemote(p) ? davHost(p) : baseName(dir)));
       pick.setAttribute('role', 'menuitemradio');
       pick.setAttribute('aria-checked', String(cur));
       const rm = el('button', { className: 'file-rm', title: 'Remove from list', onclick: () => removeFromFiles(p) },
         el('i', { className: 'fa-solid fa-xmark' }));
       rm.dataset.keep = '';
       return el('div', { className: 'file-row' }, pick, rm);
-    });
+    };
+    for (const k of ['cloud', 'git', 'local']) {
+      const list = files.filter((p) => kindOf(p) === k);
+      if (!list.length) continue;
+      if (rows.length) rows.push(el('hr', { className: 'file-sep' }));
+      rows.push(...list.map(fileRow));
+    }
+    refreshFileInfo();
   }
   const open = el('button', { role: 'menuitem', onclick: openFile }, el('i', { className: 'fa-solid fa-folder-open' }), ' Open…');
   const openDir = el('button', { role: 'menuitem', onclick: openFolder }, el('i', { className: 'fa-solid fa-folder-tree' }), ' Open folder…');
@@ -2078,6 +2235,7 @@ function render() {
   $('#moveProjects').style.display = isTauri ? '' : 'none';
   $('#davTab').style.display = isTauri ? '' : 'none';
   $('#secTab').style.display = isAndroid ? 'none' : '';
+  $('#filesTab').style.display = isTauri && !isAndroid ? '' : 'none';
   renderGit();
   $('#autoSaveToggle').style.display = isTauri ? '' : 'none';
   $('#autoSaveToggle').setAttribute('aria-checked', state.autoSave);
@@ -2570,6 +2728,7 @@ const settingsEl = $('#settings');
 function showTab(name) {
   if (name === 'webdav') dav.renderPane(settingsEl.querySelector('[data-pane=webdav]'));
   if (name === 'security') refreshSecurity();
+  if (name === 'files') { renderKnownFiles(); refreshFileInfo(true); }
   if (name === 'general' && isTauri) refreshBackupToggle();
   settingsEl.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
   settingsEl.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== name; });
@@ -2648,7 +2807,22 @@ document.addEventListener('mousedown', (e) => {
   const free = t === document.documentElement || t === document.body || t.id === 'layout' || t.id === 'listWrap' || t.tagName === 'MAIN'
     || t.id === 'addForm' || t.classList.contains('topbar') || t.classList.contains('spacer') || t.classList.contains('win-ctl')
     || t.id === 'sidebar' || t.classList.contains('empty');
-  if (!free) return;
+  if (!free) {
+    // Minimal mode: dragging an entry moves the window (only after the mouse has moved a few pixels, so a click or a double
+    // click still selects / edits the entry). Buttons, links, inputs, chips, the grip and scrollbars keep their own behaviour.
+    const row = state.minimal && state.editing === null && t instanceof Element ? t.closest('#list .task') : null;
+    if (row && !t.closest('button, a, input, select, textarea, .grip, .dd, .actions, .chip, .edit')) {
+      const x0 = e.clientX, y0 = e.clientY;
+      const stop = () => { document.removeEventListener('mousemove', move, true); document.removeEventListener('mouseup', stop, true); };
+      const move = (m) => {
+        if (!(m.buttons & 1)) return stop();
+        if (Math.hypot(m.clientX - x0, m.clientY - y0) > 5) { stop(); win().startDragging(); }
+      };
+      document.addEventListener('mousemove', move, true);
+      document.addEventListener('mouseup', stop, true);
+    }
+    return;
+  }
   if (e.detail === 2) win().toggleMaximize(); else win().startDragging();
 });
 // Minimal mode: the top bar slides in as an overlay when the mouse is above the first entry.
@@ -2747,6 +2921,16 @@ $('#keepFile').onclick = async () => {
 $('#archive').onclick = archiveDone;
 $('#browserStorage').onclick = browserStorageDialog;
 $('#backupZip').onclick = backupToZip;
+$('#addKnownFile').onclick = async () => {
+  try {
+    const p = await tauri.dialog.open({ multiple: false, directory: false, filters: TXT_FILTER });
+    if (!p) return;
+    if (!state.files.includes(p)) { state.files.push(p); saveFiles(); }
+    refreshFileInfo(true);
+    renderFileList();
+    renderKnownFiles();
+  } catch (e) { alert(`Could not add the file: ${e.message || e}`); }
+};
 $('#backupArchiveToggle').onclick = async () => {
   const on = !(await invoke('backup_on_archive').catch(() => true));
   await setCfgNow('backuparchive', on);
@@ -2925,3 +3109,17 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   tauri.opener.openUrl(a.href).catch(() => {});
 });
+
+// Minimal mode: when the input bar appears the list gets free space below its last entry; if the list was scrolled to the end it
+// stays at the end while that space grows (the last entry is never covered by the bar).
+{
+  const list = document.getElementById('list');
+  let atBottom = true;
+  list.addEventListener('scroll', () => { atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 4; }, { passive: true });
+  new MutationObserver(() => {
+    if (!state.minimal || !atBottom) return;
+    const until = performance.now() + 320;
+    const pin = () => { list.scrollTop = list.scrollHeight; if (performance.now() < until) requestAnimationFrame(pin); };
+    requestAnimationFrame(pin);
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+}

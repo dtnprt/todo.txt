@@ -125,8 +125,11 @@ pub fn print_list(lines: &[String], sort: Sort, style: Style, file_name: &str, h
                     Some(st) if color && st != DueStatus::Upcoming => format!("\x1b[{}m{num}\x1b[0m", due_code(st)),
                     _ => dim(&num, color),
                 };
-                row.push_str(&"  ".repeat(t.level)); // sub-entries are indented
                 row.push_str(if t.done { "[x] " } else { "[ ] " });
+                if t.level > 0 {
+                    // sub-entries: number and box stay in their columns, the indent starts at the priority
+                    row.push_str(&format!("{}{} ", "  ".repeat(t.level - 1), dim("└", color)));
+                }
                 match t.priority {
                     Some(p) => row.push_str(&paint(&format!("({p}) "), Tok::Priority(p), &today, color && !t.done)),
                     None => row.push_str("    "),

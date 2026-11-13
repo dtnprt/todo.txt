@@ -1,0 +1,73 @@
+/* Redmond XP - a bright blue-and-green desktop of the early 2000s: rolling green hill under a blue sky, cream windows with a
+   glossy blue title bar, rounded beige buttons, blue task-pane sidebar, royal-blue selection. Pure CSS, system fonts only
+   (Tahoma / Trebuchet MS). */
+:root { --win-radius: 8px; --list-radius: 3px;
+  --bg: #3a78d8;
+  --panel: #ece9d8;
+  --hover: #d6e3fb;
+  --line: #7a96c8;
+  --text: #000000;
+  --muted: #55607a;
+  --accent: #316ac5;
+  --accent-text: #ffffff;
+  --danger: #c4261d;
+  --warn: #b86400;
+  --ok: #2f8a1a;
+  --pA: #c4261d;
+  --pB: #c25f00;
+  --pC: #7a7000;
+  --pD: #0a3fb0;
+  --pX: #6a6a6a;
+  --due-soon: #7a7000;
+  --due-today: #c25f00;
+  --due-over: #c4261d;
+  color-scheme: light;
+  --font: Tahoma, 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  --font-size: 14px;
+  --bg-image: radial-gradient(ellipse 95% 48% at 22% 112%, #6cc23a 0, #4aa626 55%, #3a8a1c 99%, rgba(58, 138, 28, 0) 100%), radial-gradient(ellipse 60% 30% at 95% 108%, #58b52e 0, #3f9a22 98%, rgba(63, 154, 34, 0) 100%), linear-gradient(to bottom, #1c5fd0 0%, #4d92ec 42%, #9cc6f4 66%, #cfe4fa 78%);
+}
+
+body.theme-redmond-xp { -webkit-font-smoothing: auto; }
+/* title bar */
+body.theme-redmond-xp .topbar { background: linear-gradient(to bottom, #0997ff 0%, #0053ee 9%, #0050ee 40%, #0066ff 88%, #0066ff 92%, #005bff 95%, #003dd7 100%); border: 0; border-bottom: 1px solid #00309c; color: #fff; text-shadow: 1px 1px 0 #0f1089; border-radius: 0; box-shadow: none; }
+body.theme-redmond-xp .topbar h1, body.theme-redmond-xp .topbar .file-btn, body.theme-redmond-xp .topbar .dd-btn { color: #fff; }
+body.theme-redmond-xp .status { background: linear-gradient(#f2efe2, #e1dcc6); border: 0; border-top: 1px solid #aca899; color: #000; }
+/* beige push buttons with a blue frame */
+body.theme-redmond-xp button { background: linear-gradient(#ffffff 0%, #f0f0ea 45%, #d6d0c0 100%); border: 1px solid #003c74; border-radius: 3px; color: #000; text-shadow: none; padding: 3px 12px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .7); }
+body.theme-redmond-xp button:hover:not(:disabled) { box-shadow: inset 0 0 0 2px #fcd78c; background: linear-gradient(#ffffff, #f4f1e6 45%, #dcd5c2); }
+body.theme-redmond-xp button:active:not(:disabled) { background: linear-gradient(#cfc9b6, #e6e1d0); box-shadow: inset 1px 1px 2px rgba(0, 0, 0, .3); }
+body.theme-redmond-xp button.primary { box-shadow: inset 0 0 0 2px #8cb0f0; font-weight: 700; }
+/* title-bar buttons: blue squares with a white frame, red close */
+body.theme-redmond-xp .topbar button { background: linear-gradient(135deg, #5d9bff, #1f5fe0 55%, #164fc4); border: 1px solid #fff; border-radius: 3px; color: #fff; text-shadow: none; box-shadow: none; }
+body.theme-redmond-xp .topbar button:hover:not(:disabled) { background: linear-gradient(135deg, #7db4ff, #3a77f0 55%, #2a63d8); box-shadow: none; }
+body.theme-redmond-xp #winClose { background: linear-gradient(135deg, #f0a090, #d8452e 55%, #b02a14); }
+body.theme-redmond-xp #winClose:hover:not(:disabled) { background: linear-gradient(135deg, #ffb8a8, #f0603f 55%, #c8381e); }
+/* windows */
+body.theme-redmond-xp .tasks, body.theme-redmond-xp .composer-box { background: #ffffff; border: 1px solid #7f9db9; box-shadow: none; color: #000; }
+body.theme-redmond-xp .composer-box { border-radius: 3px; }
+/* the sidebar is the blue task pane of the explorer */
+body.theme-redmond-xp .sidebar { background: linear-gradient(to bottom, #7ba2e7, #6375d6); border: 1px solid #2a4ea6; border-radius: 4px; padding: 8px 10px; color: #fff; }
+body.theme-redmond-xp .sidebar h2 { color: #fff; background: linear-gradient(to right, #ffffff, #c6d3f7); color: #215dc6; padding: 3px 8px; border-radius: 4px 4px 0 0; margin: 12px 0 0; }
+body.theme-redmond-xp .sidebar h2:first-child { margin-top: 0; }
+body.theme-redmond-xp .sidebar .side-item { background: #d6dff7; color: #215dc6; border-radius: 0; }
+body.theme-redmond-xp .side-item { border: 0; box-shadow: none; padding: 3px 8px; }
+body.theme-redmond-xp .side-item:hover { text-decoration: underline; color: #428eff; background: #d6dff7; }
+body.theme-redmond-xp .side-item.active { background: #316ac5; color: #fff; }
+body.theme-redmond-xp .side-item .n { color: inherit; }
+body.theme-redmond-xp input[type=text], body.theme-redmond-xp select, body.theme-redmond-xp textarea { background: #fff; border: 1px solid #7f9db9; border-radius: 0; }
+body.theme-redmond-xp .task { border-bottom: 1px solid #e8eef8; }
+body.theme-redmond-xp .task:hover { background: #316ac5; color: #fff; }
+body.theme-redmond-xp .task:hover .body, body.theme-redmond-xp .task:hover .lineno, body.theme-redmond-xp .task:hover .chip { color: #fff; }
+body.theme-redmond-xp button.chip { background: none; border: 0; box-shadow: none; padding: 0; }
+body.theme-redmond-xp button.chip:hover:not(:disabled) { background: none; box-shadow: none; text-decoration: underline; }
+body.theme-redmond-xp .chip.project { color: #0a3fb0; }
+body.theme-redmond-xp .meta { background: #eef2fb; border: 1px solid #c5d2ee; color: #333; }
+/* menus and dialogs: cream with a blue title bar */
+body.theme-redmond-xp .dd-menu, body.theme-redmond-xp .ac, body.theme-redmond-xp .help-box { background: #ffffff; border: 1px solid #0a246a; border-radius: 6px 6px 0 0; box-shadow: 3px 3px 6px rgba(0, 0, 0, .4); backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.theme-redmond-xp .help-box { background: #ece9d8; border: 3px solid #0055ea; border-top-width: 0; }
+body.theme-redmond-xp .dd-menu button, body.theme-redmond-xp .ac button, body.theme-redmond-xp .set-pane button, body.theme-redmond-xp #themeMenu button { background: none; border: 0; box-shadow: none; border-radius: 0; }
+body.theme-redmond-xp .dd-menu button:hover, body.theme-redmond-xp .ac button:hover, body.theme-redmond-xp .set-pane button:hover, body.theme-redmond-xp #themeMenu button:hover { background: #316ac5; color: #fff; box-shadow: none; }
+body.theme-redmond-xp .set-head, body.theme-redmond-xp .help-box > h2 { background: linear-gradient(to bottom, #0997ff 0%, #0053ee 9%, #0050ee 40%, #0066ff 88%, #003dd7 100%); color: #fff; text-shadow: 1px 1px 0 #0f1089; padding: 4px 8px; margin: 0 -3px; border-radius: 6px 6px 0 0; }
+body.theme-redmond-xp .set-head h2 { color: #fff; margin: 0; }
+body.theme-redmond-xp .set-tabs button[aria-selected="true"] { background: #fff; border-bottom-color: #ff9c33; }
+body.theme-redmond-xp .scroll-area:hover::-webkit-scrollbar-thumb, body.theme-redmond-xp .scroll-area.sb-active::-webkit-scrollbar-thumb { background-color: #8fb0ef; }

@@ -279,6 +279,90 @@ fn backup_on_archive() -> bool {
     backup::archive_backup_enabled()
 }
 
+// ---------- known files: kind (cloud / git / local), encryption state, per-folder policy (.todotxt.cfg) ----------
+
+#[derive(serde::Serialize)]
+struct FileInfo {
+    path: String,
+    /// "cloud" (WebDAV) | "git" (the folder is a git repository) | "local"
+    kind: &'static str,
+    /// Is the list stored encrypted? None = unknown (nothing cached for a remote list) or the file does not exist.
+    encrypted: Option<bool>,
+    exists: bool,
+}
+
+#[tauri::command]
+async fn file_info(paths: Vec<String>) -> Result<Vec<FileInfo>, String> {
+    blocking(move || {
+        paths
+            .into_iter()
+            .map(|p| {
+                if webdav::is_remote(&p) {
+                    let enc = davcache::cached_encrypted(&p);
+                    return FileInfo { path: p, kind: "cloud", encrypted: enc, exists: true };
+                }
+                let path = Path::new(&p);
+                let git = path.parent().is_some_and(|d| d.join(".git").exists());
+                FileInfo { kind: if git { "git" } else { "local" }, encrypted: crypt::file_state(path), exists: path.exists(), path: p }
+            })
+            .collect()
+    })
+    .await
+}
+
+/// What the folder policy says about a list (None = no policy: the global setting decides): used to pre-select the answer when
+/// a new file is created.
+#[tauri::command]
+async fn crypt_policy_for(path: String, entry: Option<String>) -> Result<Option<bool>, String> {
+    blocking(move || -> Result<Option<bool>, String> {
+        if webdav::is_remote(&path) {
+            let s = server(entry.as_deref().ok_or("no WebDAV server")?)?;
+            return Ok(webdav::remote_want(&s, &path));
+        }
+        Ok(crypt::policy_for_path(Path::new(&path)))
+    })
+    .await?
+}
+
+/// Record whether one list is encrypted (an exception in the `.todotxt.cfg` of its folder, or the default of a new folder).
+/// `convert`: also rewrite an existing local file now (needs the password); a remote list is written again by the page.
+#[tauri::command]
+async fn crypt_set_file(path: String, entry: Option<String>, encrypt: bool, convert: bool) -> Result<(), String> {
+    blocking(move || -> Result<(), String> {
+        let e = |e: crypt::Error| e.to_string();
+        if webdav::is_remote(&path) {
+            let s = server(entry.as_deref().ok_or("no WebDAV server")?)?;
+            return webdav::set_remote_file_policy(&s, &path, encrypt).map_err(|e| e.to_string());
+        }
+        let p = Path::new(&path);
+        if convert && p.exists() {
+            let needs_pw = encrypt || crypt::file_state(p) == Some(true);
+            let pw = if needs_pw { Some(crypt::resolve_password().map_err(e)?) } else { None };
+            crypt::set_file_policy(p, encrypt).map_err(|e| e.to_string())?;
+            crypt::convert_file(p, pw.as_deref(), if encrypt { pw.as_deref() } else { None }).map_err(e)?;
+        } else {
+            crypt::set_file_policy(p, encrypt).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await?
+}
+
+/// Set the default of a whole folder (local path or WebDAV folder URL) and drop its exceptions.
+#[tauri::command]
+async fn crypt_set_dir(dir: String, entry: Option<String>, encrypt: bool) -> Result<(), String> {
+    blocking(move || -> Result<(), String> {
+        if webdav::is_remote(&dir) {
+            let s = server(entry.as_deref().ok_or("no WebDAV server")?)?;
+            let mut p = webdav::remote_policy(&s, &dir);
+            p.set_default(encrypt);
+            return webdav::write_remote_policy(&s, &dir, &p).map_err(|e| e.to_string());
+        }
+        crypt::set_dir_policy(Path::new(&dir), encrypt).map_err(|e| e.to_string())
+    })
+    .await?
+}
+
 // ---------- encryption (AES-256-GCM, see cli/src/crypt.rs) ----------
 
 /// Text file of a todo list / note: decrypted when it is encrypted. Errors containing "password required" /
@@ -789,6 +873,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
                 backup_create,
+                file_info,
+                crypt_policy_for,
+                crypt_set_file,
+                crypt_set_dir,
                 backup_on_archive,
                 read_text,
                 write_text,
@@ -836,6 +924,10 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
                 cfg_path,
                 backup_create,
+                file_info,
+                crypt_policy_for,
+                crypt_set_file,
+                crypt_set_dir,
                 backup_on_archive,
                 read_text,
                 write_text,

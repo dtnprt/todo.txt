@@ -274,12 +274,18 @@ fn call(server: &Server, method: &str, url: &str, headers: &[(&str, &str)], body
     }
 }
 
-/// Text of a remote file and its ETag.
-pub fn get(server: &Server, url: &str) -> Result<(String, Option<String>), Error> {
+/// Text of a remote file and its ETag, exactly as stored (an encrypted file stays encrypted).
+pub fn get_raw(server: &Server, url: &str) -> Result<(String, Option<String>), Error> {
     let res = call(server, "GET", url, &[], None)?;
     let etag = res.header("ETag").map(str::to_string);
     let mut text = String::new();
     res.into_reader().take(32 << 20).read_to_string(&mut text).map_err(|e| Error::Other(e.to_string()))?;
+    Ok((text, etag))
+}
+
+/// Text of a remote file and its ETag.
+pub fn get(server: &Server, url: &str) -> Result<(String, Option<String>), Error> {
+    let (text, etag) = get_raw(server, url)?;
     // encrypted files (todotxt-enc1) are decrypted here and encrypted again in `put`
     let text = crate::crypt::open(&text).map_err(|e| Error::Other(e.to_string()))?;
     Ok((text, etag))
@@ -289,7 +295,13 @@ pub fn get(server: &Server, url: &str) -> Result<(String, Option<String>), Error
 /// (`Error::Conflict` otherwise); without it the file is overwritten or created. Returns the new ETag.
 /// Missing parent folders are created.
 pub fn put(server: &Server, url: &str, text: &str, etag: Option<&str>) -> Result<Option<String>, Error> {
-    let sealed = crate::crypt::seal_if_enabled(text).map_err(|e| Error::Other(e.to_string()))?;
+    // encrypted or not: the `.todotxt.cfg` of the folder on the server decides, else the global setting
+    let sealed = if remote_want(server, url).unwrap_or_else(crate::crypt::enabled) {
+        let pw = crate::crypt::resolve_password().map_err(|e| Error::Other(e.to_string()))?;
+        crate::crypt::seal(text, &pw).map_err(|e| Error::Other(e.to_string()))?
+    } else {
+        text.to_string()
+    };
     let mut headers: Vec<(&str, &str)> = vec![("Content-Type", "text/plain; charset=utf-8")];
     if let Some(e) = etag {
         headers.push(("If-Match", e));
@@ -486,6 +498,76 @@ fn find_tag_close(lower: &str, name: &str, from: usize) -> Option<usize> {
         i = e;
     }
     None
+}
+
+// ---------- per-folder encryption policy on the server (`.todotxt.cfg`) ----------
+
+static POLICIES: std::sync::Mutex<Vec<(String, std::time::Instant, crate::crypt::Policy)>> = std::sync::Mutex::new(Vec::new());
+
+/// The policy file of a server folder (cached for 30 seconds; empty when there is none).
+pub fn remote_policy(server: &Server, dir_url: &str) -> crate::crypt::Policy {
+    {
+        let c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, at, p)) = c.iter().find(|(u, _, _)| u == dir_url) {
+            if at.elapsed() < Duration::from_secs(30) {
+                return p.clone();
+            }
+        }
+    }
+    let p = match get_raw(server, &join(dir_url, crate::crypt::DIR_CFG)) {
+        Ok((t, _)) => crate::crypt::Policy::parse(&t),
+        Err(_) => crate::crypt::Policy::default(), // none (or the server is unreachable: no opinion)
+    };
+    let mut c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
+    c.retain(|(u, _, _)| u != dir_url);
+    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone()));
+    p
+}
+
+/// Write the policy file of a server folder.
+pub fn write_remote_policy(server: &Server, dir_url: &str, p: &crate::crypt::Policy) -> Result<(), Error> {
+    put_plain(server, &join(dir_url, crate::crypt::DIR_CFG), &p.render())?;
+    let mut c = POLICIES.lock().unwrap_or_else(|e| e.into_inner());
+    c.retain(|(u, _, _)| u != dir_url);
+    c.push((dir_url.to_string(), std::time::Instant::now(), p.clone()));
+    Ok(())
+}
+
+/// Upload text as it is (no encryption).
+pub fn put_plain(server: &Server, url: &str, text: &str) -> Result<(), Error> {
+    let headers: Vec<(&str, &str)> = vec![("Content-Type", "text/plain; charset=utf-8")];
+    match call(server, "PUT", url, &headers, Some(text)) {
+        Err(Error::Other(m)) if m.contains("409") => {
+            make_parents(server, url)?;
+            call(server, "PUT", url, &headers, Some(text))?;
+        }
+        other => {
+            other?;
+        }
+    }
+    Ok(())
+}
+
+/// What the folder policy says about the remote file `url`: lists use the exceptions of their folder, notes (`notes/`) and
+/// images (`images/`) the default of the folder above. None = no opinion.
+pub fn remote_want(server: &Server, url: &str) -> Option<bool> {
+    let dir = parent(url);
+    let name = file_name(url);
+    let last = dir.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_lowercase();
+    if matches!(last.as_str(), "notes" | "images") {
+        if let Some(d) = remote_policy(server, &parent(&dir)).default {
+            return Some(d);
+        }
+    }
+    remote_policy(server, &dir).decide(&name)
+}
+
+/// Record the encryption choice for one remote list.
+pub fn set_remote_file_policy(server: &Server, url: &str, encrypt: bool) -> Result<(), Error> {
+    let dir = parent(url);
+    let mut p = remote_policy(server, &dir);
+    p.set_file(&file_name(url), encrypt);
+    write_remote_policy(server, &dir, &p)
 }
 
 /// Join a folder URL and a child name (the name is percent-encoded).

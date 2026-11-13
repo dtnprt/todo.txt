@@ -1,0 +1,64 @@
+/* Redmond 7 - a glassy blue desktop of the late 2000s: frosted translucent window frames, white content, pale blue
+   navigation pane, soft gradient buttons, light-blue selection, dark glass taskbar. Pure CSS, system fonts only (Segoe UI). */
+:root { --win-radius: 8px; --list-radius: 3px;
+  --bg: #1d5fb0;
+  --panel: rgba(214, 228, 245, .82);
+  --hover: #dcecfb;
+  --line: #8e9fb8;
+  --text: #000000;
+  --muted: #4a5568;
+  --accent: #3399ff;
+  --accent-text: #ffffff;
+  --danger: #c0392b;
+  --warn: #b86a00;
+  --ok: #2a8a2a;
+  --pA: #c0392b;
+  --pB: #c26a00;
+  --pC: #8a7a00;
+  --pD: #1e3287;
+  --pX: #666666;
+  --due-soon: #8a7a00;
+  --due-today: #c26a00;
+  --due-over: #c0392b;
+  color-scheme: light;
+  --font: 'Segoe UI', 'Segoe UI Variable', Tahoma, 'Helvetica Neue', Arial, sans-serif;
+  --font-size: 14px;
+  --bg-image: radial-gradient(ellipse 70% 40% at 55% 105%, rgba(110, 200, 255, .9) 0, rgba(110, 200, 255, 0) 70%), radial-gradient(ellipse 50% 60% at 15% 20%, rgba(40, 120, 230, .6) 0, rgba(40, 120, 230, 0) 70%), linear-gradient(160deg, #0b3f9c 0%, #1565c8 45%, #2d8be8 75%, #52a8f0 100%);
+}
+
+body.theme-redmond-7 { -webkit-font-smoothing: antialiased; }
+/* glass frame: title bar and taskbar */
+body.theme-redmond-7 .topbar { background: linear-gradient(to bottom, rgba(225, 238, 252, .92), rgba(170, 200, 232, .88)); border: 0; border-bottom: 1px solid rgba(40, 70, 110, .55); box-shadow: inset 0 1px rgba(255, 255, 255, .9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); text-shadow: 0 0 8px #fff, 0 0 3px #fff; }
+body.theme-redmond-7 .status { background: linear-gradient(to bottom, rgba(70, 100, 140, .9), rgba(20, 40, 70, .95)); border: 0; border-top: 1px solid rgba(255, 255, 255, .35); color: #fff; }
+/* buttons */
+body.theme-redmond-7 button { background: linear-gradient(#f6f6f6 0%, #ebebeb 48%, #dddddd 52%, #cfcfcf 100%); border: 1px solid #707070; border-radius: 3px; color: #000; text-shadow: none; padding: 3px 13px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .85); }
+body.theme-redmond-7 button:hover:not(:disabled) { background: linear-gradient(#eaf6fd 0%, #d9f0fc 48%, #bee6fd 52%, #a7d9f5 100%); border-color: #3c7fb1; }
+body.theme-redmond-7 button:active:not(:disabled) { background: linear-gradient(#e5f4fc, #c4e5f6 48%, #98d1ef 52%, #68b3db); border-color: #2c628b; box-shadow: inset 0 1px 3px rgba(0, 0, 0, .3); }
+body.theme-redmond-7 button.primary { border-color: #3c7fb1; box-shadow: inset 0 0 0 1px #cbe9fb; }
+body.theme-redmond-7 .topbar button { background: linear-gradient(rgba(255, 255, 255, .55), rgba(255, 255, 255, .15)); border: 1px solid rgba(60, 90, 130, .6); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .6); }
+body.theme-redmond-7 .topbar button:hover:not(:disabled) { background: linear-gradient(#eaf6fd, #bee6fd 52%, #a7d9f5); border-color: #3c7fb1; }
+body.theme-redmond-7 #winClose { background: linear-gradient(#e8a8a0, #cc5a50 48%, #b02a20 52%, #d06a5e); border-color: #6b1a14; color: #fff; }
+body.theme-redmond-7 #winClose:hover:not(:disabled) { background: linear-gradient(#f4b8b0, #e0463a 48%, #c81f12 52%, #e8685a); }
+/* content */
+body.theme-redmond-7 .tasks, body.theme-redmond-7 .composer-box { background: #ffffff; border: 1px solid #828790; box-shadow: none; color: #000; }
+body.theme-redmond-7 .sidebar { background: linear-gradient(to bottom, #ffffff, #e6eef8); border: 1px solid #99aabf; border-radius: 3px; padding: 8px 10px; }
+body.theme-redmond-7 .sidebar h2 { color: #1e3287; text-transform: none; font-size: 13px; letter-spacing: 0; }
+body.theme-redmond-7 input[type=text], body.theme-redmond-7 select, body.theme-redmond-7 textarea { background: #fff; border: 1px solid #abadb3; border-top-color: #8a8f99; border-radius: 2px; }
+body.theme-redmond-7 .task { border-bottom: 1px solid #edf1f7; }
+body.theme-redmond-7 .task:hover { background: linear-gradient(#f4faff, #dcefff); box-shadow: inset 0 0 0 1px #b8d6fb; }
+body.theme-redmond-7 .side-item { border: 1px solid transparent; background: none; box-shadow: none; border-radius: 3px; }
+body.theme-redmond-7 .side-item:hover { background: linear-gradient(#f4faff, #dcefff); border-color: #b8d6fb; }
+body.theme-redmond-7 .side-item.active { background: linear-gradient(#e5f4fd, #c4e5f6); border-color: #7da2ce; color: #000; }
+body.theme-redmond-7 button.chip { background: none; border: 0; box-shadow: none; padding: 0; }
+body.theme-redmond-7 button.chip:hover:not(:disabled) { background: none; border: 0; text-decoration: underline; }
+body.theme-redmond-7 .chip.project { color: #1e3287; }
+body.theme-redmond-7 .meta { background: #eef3fa; border: 1px solid #cfdaea; color: #333; }
+/* menus and dialogs: frosted glass frame around white content */
+body.theme-redmond-7 .dd-menu, body.theme-redmond-7 .ac { background: rgba(250, 252, 255, .97); border: 1px solid #868686; border-radius: 3px; box-shadow: 2px 3px 6px rgba(0, 0, 0, .35); backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.theme-redmond-7 .help-box { background: rgba(214, 228, 245, .9); border: 1px solid rgba(20, 40, 70, .7); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255, 255, 255, .6) inset, 0 8px 28px rgba(0, 0, 0, .55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+body.theme-redmond-7 .dd-menu button, body.theme-redmond-7 .ac button, body.theme-redmond-7 .set-pane button, body.theme-redmond-7 #themeMenu button { background: none; border: 1px solid transparent; box-shadow: none; border-radius: 3px; }
+body.theme-redmond-7 .dd-menu button:hover, body.theme-redmond-7 .ac button:hover, body.theme-redmond-7 .set-pane button:hover, body.theme-redmond-7 #themeMenu button:hover { background: linear-gradient(#e5f4fd, #c4e5f6); border-color: #7da2ce; box-shadow: none; }
+body.theme-redmond-7 .set-pane, body.theme-redmond-7 #themeMenu { background: #fff; }
+body.theme-redmond-7 .set-head h2, body.theme-redmond-7 .help-box > h2 { color: #1e3287; text-shadow: 0 0 6px #fff; }
+body.theme-redmond-7 .set-tabs button[aria-selected="true"] { background: #fff; border-bottom-color: #3399ff; }
+body.theme-redmond-7 .scroll-area:hover::-webkit-scrollbar-thumb, body.theme-redmond-7 .scroll-area.sb-active::-webkit-scrollbar-thumb { background-color: #8fb8e8; }

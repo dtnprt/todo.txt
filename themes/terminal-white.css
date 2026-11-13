@@ -42,3 +42,5 @@ body[class*="theme-terminal"] button.chip { border: 0; background: none; padding
 body[class*="theme-terminal"] button.chip:hover:not(:disabled) { text-decoration: underline; }
 body[class*="theme-terminal"] .sidebar h2 { font-size: 16px; }
 body[class*="theme-terminal"] .meta { font-size: 16px; }
+body[class*="theme-terminal"] .file-row button { border: 0; background: none; }
+body[class*="theme-terminal"] .file-row .file-rm { padding: 0 10px; min-width: 2em; }

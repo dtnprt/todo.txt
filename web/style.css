@@ -74,7 +74,7 @@ body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px)
 
 .tasks { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .tasks:empty { display: none; }
-.task { display: flex; gap: 10px; align-items: center; padding: 8px 12px; padding-left: calc(12px + var(--lvl, 0) * 28px); border-bottom: 1px solid var(--line); }
+.task { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .task:last-child { border-bottom: 0; }
 .task:hover { background: var(--hover); }
 .task input[type=checkbox] { margin: 0; width: 16px; height: 16px; flex: none; cursor: pointer; }
@@ -496,7 +496,9 @@ body:not(.android).minimal .sidebar { top: auto; max-height: none; }
    16px margin below as above; inside it ends in free space ("invisible entry") as high as the part of the bar that overlaps
    the list, so the last entry can be scrolled clear of the bar. */
 body:not(.android).minimal .layout { padding-bottom: 16px; }
-body:not(.android).minimal #list { padding-bottom: calc(var(--composer-h, 76px) - 8px); }
+/* the free space only exists while the input bar is visible (mouse near the bottom, or typing): otherwise the list ends at its last entry */
+body:not(.android).minimal #list { padding-bottom: 0; transition: padding-bottom .2s ease; }
+body:not(.android).minimal.show-input #list, body:not(.android).minimal:has(.composer:focus-within) #list, body:not(.android).minimal:has(.composer:hover) #list { padding-bottom: calc(var(--composer-h, 76px) - 8px); }
 body:not(.android).minimal .tasks > .task:last-child { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
 
@@ -559,3 +561,28 @@ body:not(.android).minimal.nosidebar .composer, body:not(.android).minimal .layo
 .bs-row .bs-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-row small { color: var(--muted); }
 .bs-row button { padding: 2px 10px; }
+
+/* settings tabs: keep the tab look in every theme (themes style every `button`), About stays at the far right */
+body .set-tabs button[role="tab"] { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; }
+body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: var(--accent); }
+
+/* sub-entries: line number / grip and checkbox stay in their columns; the indent starts at the priority button, marked by an
+   L-shaped connector (colours follow the theme) */
+.task[data-level] .pri-dd { position: relative; margin-left: calc((var(--lvl, 1) - 1) * 22px); padding-left: 18px; }
+.task[data-level] .pri-dd::before { content: ""; position: absolute; left: 3px; top: -12px; width: 10px; height: calc(50% + 12px); border-left: 2px solid var(--muted); border-bottom: 2px solid var(--muted); border-bottom-left-radius: 4px; opacity: .7; pointer-events: none; }
+
+/* file menu: cloud / git / local groups with icons; known files tab */
+.file-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+.file-pick .file-kind { width: 1.1em; text-align: center; color: var(--muted); flex: none; }
+.file-pick .file-enc { font-size: .8em; color: var(--muted); margin-left: .3em; }
+.known-files { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 10px; }
+.known-files hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; width: 100%; }
+.kf-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; }
+.kf-row.current { background: var(--hover); }
+.kf-kind { width: 1.4em; text-align: center; color: var(--muted); flex: none; }
+.kf-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.kf-name b, .kf-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kf-name small { color: var(--muted); font-size: 12px; }
+.kf-enc { color: var(--muted); white-space: nowrap; font-size: 13px; }
+.kf-enc.on { color: var(--ok); }
+.kf-row button { padding: 2px 10px; }

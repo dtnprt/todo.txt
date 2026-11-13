@@ -201,6 +201,8 @@ struct App {
     last_check: Instant,
     /// When `todo.cfg` was last looked at for a file switch made by the desktop app / CLI.
     cfg_checked: Instant,
+    /// The `lastfile=` value this app last saw / wrote: only a different value (another client switched) is followed.
+    last_seen: Option<PathBuf>,
     picker: Option<Picker>,
     /// F10 git settings popup: selected row.
     git_menu: Option<usize>,
@@ -251,6 +253,7 @@ pub fn run(path: PathBuf, folder: Option<PathBuf>, sort: Sort) -> io::Result<()>
         disk_text,
         last_check: Instant::now(),
         cfg_checked: Instant::now(),
+        last_seen: config::Config::load().lastfile,
         picker: None,
         git_menu: None,
         server_diff: None,
@@ -369,12 +372,17 @@ impl App {
         }
         let cfg = config::Config::load();
         let Some(last) = cfg.lastfile.clone() else { return };
+        if self.last_seen.as_ref() == Some(&last) {
+            return; // nothing new: do not pull this app back to a file it just left
+        }
+        self.last_seen = Some(last.clone());
         let norm = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
         if norm(&last) == norm(&self.path) {
             return;
         }
         let in_folder = cfg.folder.as_ref().is_some_and(|d| folder::is_inside(d, &last));
         let known = in_folder
+            || crate::webdav::is_remote(&last.to_string_lossy())
             || cfg.file.as_ref().is_some_and(|f| norm(f) == norm(&last))
             || cfg.files.iter().any(|f| norm(f) == norm(&last));
         if !known {
@@ -408,6 +416,7 @@ impl App {
                     let (p2, f2) = (path.clone(), folder.clone());
                     config::update(|c| {
                         c.lastfile = Some(p2.clone());
+                        self.last_seen = Some(p2.clone());
                         c.file = Some(p2);
                         c.folder = f2;
                     });
@@ -1741,9 +1750,13 @@ impl App {
         let row_due = todotxt::due_status(&t, today).filter(|_| !t.done).and_then(due_style);
         let mut spans = vec![
             Span::styled(format!("{:>3} ", line + 1), row_due.unwrap_or_else(dim)),
-            Span::raw("  ".repeat(t.level)), // sub-entries are indented
             Span::raw(if t.done { "[x] " } else { "[ ] " }),
         ];
+        if t.level > 0 {
+            // sub-entries: number and box stay in their columns, the indent starts at the priority
+            spans.push(Span::raw("  ".repeat(t.level - 1)));
+            spans.push(Span::styled("└ ", dim()));
+        }
         match t.priority {
             Some(p) if !t.done => spans.push(Span::styled(format!("({p}) "), tok_style(Tok::Priority(p)))),
             Some(p) => spans.push(Span::styled(format!("({p}) "), dim())),

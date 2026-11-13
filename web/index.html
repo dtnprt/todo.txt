@@ -99,9 +99,10 @@
         <button type="button" role="tab" data-tab="general" aria-selected="true">General</button>
         <button type="button" role="tab" data-tab="appearance" aria-selected="false">Appearance</button>
         <button type="button" role="tab" data-tab="themes" aria-selected="false">Themes</button>
+        <button type="button" role="tab" data-tab="files" aria-selected="false" id="filesTab" style="display:none">Known files</button>
         <button type="button" role="tab" data-tab="security" aria-selected="false" id="secTab" style="display:none">Security</button>
-        <button type="button" role="tab" data-tab="about" aria-selected="false">About</button>
         <button type="button" role="tab" data-tab="webdav" aria-selected="false" id="davTab" style="display:none">WebDAV</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false">About</button>
       </div>
       <div class="set-pane" data-pane="general">
         <h3 class="set-sub">General</h3>
@@ -134,10 +135,16 @@
           <button id="themeReload" type="button" class="theme-reload" title="Re-read the chosen theme file (Ctrl+Shift+T)"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload theme <kbd>Ctrl+Shift+T</kbd></button>
         </div>
       </div>
+      <div class="set-pane" data-pane="files" hidden>
+        <h3 class="set-sub">Known files</h3>
+        <span class="set-hint">These files are in the file menu, and the terminal app follows the current file when it is a cloud (WebDAV) file or listed here. The icon shows where a file lives (cloud, git folder, local); the lock whether it is stored encrypted. Each folder keeps a hidden <b>.todotxt.cfg</b> that says what is encrypted there, so single files can stay readable for other apps.</span>
+        <div id="knownFiles" class="known-files"></div>
+        <button id="addKnownFile"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add file…</button>
+      </div>
       <div class="set-pane" data-pane="security" hidden>
         <h3 class="set-sub">Encryption <span class="exp-badge" title="Not widely tested yet">experimental</span></h3>
         <span class="set-hint exp-note"><b>Experimental.</b> This feature is new and has not been reviewed or tested widely. Keep a backup of your files (File → Backup as .zip…) before you switch it on, and do not rely on it for highly sensitive data. <b>Encrypted files can no longer be read by other todo.txt apps, editors or scripts</b> – only by this app (web, desktop, terminal), which all share the format.</span>
-        <button id="encToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Encrypt my files (AES-256-GCM)</button>
+        <button id="encToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Encrypt the files of this folder (AES-256-GCM)</button>
         <span class="set-hint">Lists, notes and the WebDAV offline cache are written encrypted, so a git remote or a WebDAV server only ever sees ciphertext. Pasted images are not encrypted. Keep the password safe: without it the files cannot be read.</span>
         <h3 class="set-sub">Password</h3>
         <span class="set-hint" id="encStatus"></span>

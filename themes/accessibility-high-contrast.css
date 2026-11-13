@@ -34,3 +34,4 @@ body.theme-accessibility-high-contrast button.side-item { border: 0; }
 body.theme-accessibility-high-contrast .side-item:hover:not(:disabled) { text-decoration: underline; }
 body.theme-accessibility-high-contrast button.chip { border: 0; background: none; padding: 0; }
 body.theme-accessibility-high-contrast button.chip:hover:not(:disabled) { background: none; color: #ffff00; text-decoration: underline; }
+body.theme-accessibility-high-contrast .file-row button { border: 0; }

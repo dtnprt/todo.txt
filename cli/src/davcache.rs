@@ -114,6 +114,12 @@ fn write(d: &std::path::Path, name: &str, text: &str) {
     }
 }
 
+/// Is the cached copy of this remote list stored encrypted? None = nothing cached.
+pub fn cached_encrypted(url: &str) -> Option<bool> {
+    let t = fs::read_to_string(dir(url).join("base.txt")).ok()?;
+    Some(crate::crypt::is_encrypted(&t))
+}
+
 fn store_base(d: &std::path::Path, url: &str, text: &str, etag: Option<&str>) {
     store_base_with(d, url, text, etag, true, true);
 }
