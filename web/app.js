@@ -104,6 +104,7 @@ const state = {
   calendar: true,
   minimal: false,
   statusBar: true,
+  scrollbars: true,    // thin themed scrollbars (visible on hover / while scrolling); Settings -> View
   touchBar: isAndroid || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches),   // helper bar under the input (touch screens); Settings -> General
   noCapture: false,     // desktop only (todo.cfg `nocapture=`): hide the window from screenshots / screen sharing
   onTop: false,         // desktop only (todo.cfg `ontop=`)
@@ -126,7 +127,7 @@ function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       lines: state.lines, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
-      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
+      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, scrollbars: state.scrollbars, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
@@ -147,6 +148,7 @@ function restore() {
     state.calendar = s.calendar !== false;
     state.minimal = !!s.minimal;
     state.statusBar = s.statusBar !== false;
+    state.scrollbars = s.scrollbars !== false;
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
     if (typeof s.cornerName === 'boolean') state.cornerName = s.cornerName;
@@ -1022,6 +1024,7 @@ async function loadAutoSave() {
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
     if (/^\s*showdates\s*=/m.test(cfg)) state.showDates = flag('showdates');
     if (/^\s*cornername\s*=/m.test(cfg)) state.cornerName = flag('cornername');
+    if (/^\s*scrollbars\s*=/m.test(cfg)) state.scrollbars = flag('scrollbars');
     if (/^\s*statusbar\s*=/m.test(cfg)) state.statusBar = flag('statusbar');   // shared with the terminal app
   } catch { /* no config yet: off */ }
   render();
@@ -1642,6 +1645,8 @@ function render() {
   $('#calToggle').setAttribute('aria-checked', state.calendar);
   $('#minimalToggle').setAttribute('aria-checked', state.minimal);
   $('#statusToggle').setAttribute('aria-checked', state.statusBar);
+  $('#scrollbarToggle').setAttribute('aria-checked', state.scrollbars);
+  document.body.classList.toggle('noscrollbars', !state.scrollbars);
   $('#touchToggle').setAttribute('aria-checked', state.touchBar);
   $('#datesToggle').setAttribute('aria-checked', state.showDates);
   $('#cornerToggle').setAttribute('aria-checked', state.cornerName);
@@ -2155,6 +2160,15 @@ document.querySelectorAll('[data-sort]').forEach((b) => {
 $('#showDone').onclick = () => { state.showDone = !state.showDone; persist(); render(); };
 $('#viewToggle').onclick = () => { state.view = state.view === 'list' ? 'text' : 'list'; render(); };
 $('#statusToggle').onclick = () => { state.statusBar = !state.statusBar; if (isTauri) setCfg('statusbar', state.statusBar); persist(); render(); };
+$('#scrollbarToggle').onclick = () => { state.scrollbars = !state.scrollbars; if (isTauri) setCfg('scrollbars', state.scrollbars); persist(); render(); };
+// show the scrollbar of a scroll area while it is scrolled (it is otherwise only visible on hover)
+document.addEventListener('scroll', (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement) || !t.classList.contains('scroll-area')) return;
+  t.classList.add('sb-active');
+  clearTimeout(t._sbTimer);
+  t._sbTimer = setTimeout(() => t.classList.remove('sb-active'), 900);
+}, true);
 $('#minimalToggle').onclick = () => { state.minimal = !state.minimal; persist(); render(); };
 $('#cornerToggle').onclick = () => { state.cornerName = !state.cornerName; if (isTauri) setCfg('cornername', state.cornerName); persist(); render(); };
 $('#datesToggle').onclick = () => { state.showDates = !state.showDates; if (isTauri) setCfg('showdates', state.showDates); persist(); render(); };

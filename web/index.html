@@ -66,11 +66,11 @@
   </header>
 
   <div class="layout" id="layout">
-    <aside class="sidebar" id="sidebar" aria-label="Filters"></aside>
+    <aside class="sidebar scroll-area" id="sidebar" aria-label="Filters"></aside>
 
     <main>
-      <div id="listWrap" class="list-wrap"><ul id="list" class="tasks"></ul></div>
-      <textarea id="raw" class="raw" spellcheck="false" hidden aria-label="Raw todo.txt"></textarea>
+      <div id="listWrap" class="list-wrap scroll-area"><ul id="list" class="tasks scroll-area"></ul></div>
+      <textarea id="raw" class="raw scroll-area" spellcheck="false" hidden aria-label="Raw todo.txt"></textarea>
 
       <form id="addForm" class="composer" autocomplete="off">
         <div class="composer-box">
@@ -112,6 +112,7 @@
         <h3 class="set-sub">View</h3>
         <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Sidebar <kbd>F4</kbd></button>
         <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Status bar</button>
+        <button id="scrollbarToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Scrollbars</button>
         <button id="datesToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show created/done dates in entries</button>
         <button id="cornerToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show file name in minimal mode</button>
         <button id="lineNoToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Line numbers</button>
