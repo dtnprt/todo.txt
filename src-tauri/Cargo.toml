@@ -1,6 +1,6 @@
 [package]
 name = "todotxt"
-version = "0.1.60"
+version = "0.1.61"
 description = "todo.txt desktop app"
 edition = "2021"
 
