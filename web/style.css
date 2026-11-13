@@ -55,8 +55,8 @@ input[type=text], input[type=search], select, textarea { background: var(--panel
 .layout.no-side { grid-template-columns: minmax(0, 1fr); padding-left: 16px; }
 main { display: contents; }
 .layout > .sidebar { grid-column: 1; grid-row: 1; }
-#list, #raw { grid-column: 2; grid-row: 1; align-self: start; }
-.layout.no-side #list, .layout.no-side #raw { grid-column: 1; }
+#listWrap, #raw { grid-column: 2; grid-row: 1; align-self: start; }
+.layout.no-side #listWrap, .layout.no-side #raw { grid-column: 1; }
 #raw { align-self: stretch; }
 .sidebar { align-self: start; position: sticky; top: 64px; margin-left: 16px; max-height: calc(100vh - 64px - 28px - var(--composer-h, 76px) - 8px); overflow: auto; }
 body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px) - 8px); }
@@ -104,7 +104,7 @@ body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px)
 @media (max-width: 720px) {
   /* too narrow for the sidebar: hide it (the Android drawer is separate) */
   .layout { grid-template-columns: minmax(0, 1fr); padding: 12px 12px 0; }
-  .layout #list, .layout #raw { grid-column: 1; }
+  .layout #listWrap, .layout #raw { grid-column: 1; }
   body:not(.android) .sidebar { display: none; }
   .composer { margin-left: 0 !important; }
   /* the entry buttons (note / edit / delete) float over the text on hover instead of taking space from it */
@@ -487,10 +487,24 @@ body.minimal.show-input .dav-corner, body.minimal:has(.composer:focus-within) .d
    (and, separately, the sidebar) scrolls. Android keeps its own block layout. */
 html:not(:has(body.android)), html:not(:has(body.android)) body { height: 100vh; overflow: hidden; }
 body:not(.android) .layout { flex: 1 1 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr) auto; }
-body:not(.android) #list, body:not(.android) #raw { align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+body:not(.android) #listWrap, body:not(.android) #raw { align-self: stretch; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 body:not(.android) .sidebar { position: static; align-self: stretch; max-height: none; min-height: 0; overflow-y: auto; }
 body:not(.android) .composer { position: relative; bottom: auto; }
 body:not(.android).minimal .composer { position: fixed; bottom: 0; }
 body:not(.android).minimal .sidebar { top: auto; max-height: none; }
-/* minimal mode: the input bar floats over the bottom of the window, so the list ends above it (margin, not padding: the list frame ends there) */
-body:not(.android).minimal #list, body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
+/* minimal mode: the input bar floats over the bottom of the window. The scroll area (#listWrap) fills the whole height
+   and ends in free space as high as the bar ("invisible entry"), so the last entry can be scrolled clear of it. */
+body:not(.android).minimal #listWrap { padding-bottom: calc(var(--composer-h, 76px) + 8px); box-sizing: border-box; }
+body:not(.android).minimal #raw { margin-bottom: calc(var(--composer-h, 76px) + 8px); }
+
+/* Scrollbars (list, text view, sidebar): thin, themed, only visible while hovering the area */
+body:not(.android) #listWrap::-webkit-scrollbar, body:not(.android) #raw::-webkit-scrollbar, body:not(.android) .sidebar::-webkit-scrollbar { width: 12px; height: 12px; }
+body:not(.android) #listWrap::-webkit-scrollbar-track, body:not(.android) #raw::-webkit-scrollbar-track, body:not(.android) .sidebar::-webkit-scrollbar-track,
+body:not(.android) #listWrap::-webkit-scrollbar-corner { background: transparent; }
+body:not(.android) #listWrap::-webkit-scrollbar-button, body:not(.android) #raw::-webkit-scrollbar-button, body:not(.android) .sidebar::-webkit-scrollbar-button { display: none; }
+body:not(.android) #listWrap::-webkit-scrollbar-thumb, body:not(.android) #raw::-webkit-scrollbar-thumb, body:not(.android) .sidebar::-webkit-scrollbar-thumb {
+  background: transparent; border: 3px solid transparent; background-clip: padding-box; border-radius: 8px; }
+body:not(.android) #listWrap:hover::-webkit-scrollbar-thumb, body:not(.android) #raw:hover::-webkit-scrollbar-thumb, body:not(.android) .sidebar:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+body:not(.android) #listWrap:hover::-webkit-scrollbar-thumb:hover, body:not(.android) #raw:hover::-webkit-scrollbar-thumb:hover, body:not(.android) .sidebar:hover::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent); }

@@ -1659,6 +1659,7 @@ function render() {
 
   const listMode = state.view === 'list';
   $('#list').hidden = !listMode;
+  $('#listWrap').hidden = !listMode;
   $('#raw').hidden = listMode;
   const showSide = listMode && state.sidebar;
   $('#sidebar').hidden = !showSide;
@@ -2170,7 +2171,7 @@ addEventListener('resize', applyRoundCorners);
 document.addEventListener('mousedown', (e) => {
   if (!isTauri || !state.frameless || e.button !== 0) return;
   const t = e.target;
-  const free = t === document.documentElement || t === document.body || t.id === 'layout' || t.tagName === 'MAIN'
+  const free = t === document.documentElement || t === document.body || t.id === 'layout' || t.id === 'listWrap' || t.tagName === 'MAIN'
     || t.id === 'addForm' || t.classList.contains('topbar') || t.classList.contains('spacer') || t.classList.contains('win-ctl')
     || t.id === 'sidebar' || t.classList.contains('empty');
   if (!free) return;
