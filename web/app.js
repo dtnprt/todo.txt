@@ -2219,6 +2219,7 @@ addEventListener('resize', applyRoundCorners);
 document.addEventListener('mousedown', (e) => {
   if (!isTauri || !state.frameless || e.button !== 0) return;
   const t = e.target;
+  if (t instanceof HTMLElement && e.offsetX > t.clientWidth && t.scrollHeight > t.clientHeight) return;   // dragging a scrollbar must not move the window
   const free = t === document.documentElement || t === document.body || t.id === 'layout' || t.id === 'listWrap' || t.tagName === 'MAIN'
     || t.id === 'addForm' || t.classList.contains('topbar') || t.classList.contains('spacer') || t.classList.contains('win-ctl')
     || t.id === 'sidebar' || t.classList.contains('empty');

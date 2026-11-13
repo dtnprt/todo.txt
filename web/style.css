@@ -519,3 +519,7 @@ body.noscrollbars .scroll-area::-webkit-scrollbar { display: none; }
 .paste-row { padding-top: 1px; padding-bottom: 1px; }
 .paste-q { font-size: 14px; }
 .paste-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+/* minimal mode: the list frame scrolls with the entries, so the visible area is clipped to rounded corners (theme token --list-radius) */
+:root { --list-radius: 8px; }
+body:not(.android).minimal #listWrap { clip-path: inset(0 round var(--list-radius)); }
