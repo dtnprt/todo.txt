@@ -28,7 +28,7 @@ Your tasks stay in a plain `todo.txt` file. Nothing is uploaded anywhere.
 
 ## Download
 
-Installers (Windows, macOS, Linux), the terminal app `todo` and a zip of the web app are on the [releases page](https://github.com/dtnprt/todo.txt/releases). A GitHub workflow (`.github/workflows/release.yml`) builds them whenever a push to `main` carries a new `VERSION` and publishes a pre-release `vX.Y.Z`. Builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn.
+Installers (Windows, macOS, Linux), the terminal app `todo`, the Android app (arm64 `.apk`, install it by hand) and a zip of the web app are on the [releases page](https://github.com/dtnprt/todo.txt/releases). A GitHub workflow (`.github/workflows/release.yml`) builds them whenever a push to `main` carries a new `VERSION` and publishes a pre-release `vX.Y.Z`. Builds are unsigned: Windows SmartScreen and macOS Gatekeeper will warn.
 
 ## Branches and releases
 
