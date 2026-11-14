@@ -1,6 +1,13 @@
 package dev.todotxt.desktop
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
+import androidx.core.view.WindowCompat
 import android.os.Bundle
 import android.os.Environment
 import android.view.View
@@ -22,17 +29,62 @@ class MainActivity : TauriActivity() {
     ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
       val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
       v.setPadding(b.left, b.top, b.right, b.bottom)
+      bars.top = b.top
+      bars.bottom = b.bottom
+      bars.invalidateSelf()
       WindowInsetsCompat.CONSUMED
+    }
+    content.background = bars
+  }
+
+  /** Paints the areas behind the (transparent) status / navigation bar in the colours of the page theme. */
+  private val bars = BarsDrawable()
+
+  fun setBars(top: Int, bottom: Int, lightIcons: Boolean) {
+    runOnUiThread {
+      bars.topColor = top
+      bars.bottomColor = bottom
+      bars.invalidateSelf()
+      window.statusBarColor = Color.TRANSPARENT
+      window.navigationBarColor = Color.TRANSPARENT
+      val c = WindowCompat.getInsetsController(window, window.decorView)
+      c.isAppearanceLightStatusBars = !lightIcons
+      c.isAppearanceLightNavigationBars = !lightIcons
     }
   }
 
   override fun onWebViewCreate(webView: WebView) {
-    webView.addJavascriptInterface(StorageBridge(this), "TodoAndroid")
+    webView.addJavascriptInterface(StorageBridge(this, this), "TodoAndroid")
   }
 }
 
 /** Storage locations for the todo files (used by web/app.js as `window.TodoAndroid`). */
-class StorageBridge(private val ctx: Context) {
+class BarsDrawable : Drawable() {
+  var topColor = Color.BLACK
+  var bottomColor = Color.BLACK
+  var top = 0
+  var bottom = 0
+  private val paint = Paint()
+  override fun draw(c: Canvas) {
+    val r = bounds
+    paint.color = bottomColor
+    c.drawRect(r, paint)
+    paint.color = topColor
+    c.drawRect(r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), (r.top + top).toFloat(), paint)
+  }
+  override fun setAlpha(a: Int) {}
+  override fun setColorFilter(f: ColorFilter?) {}
+  @Deprecated("deprecated in Android")
+  override fun getOpacity() = PixelFormat.OPAQUE
+}
+
+class StorageBridge(private val ctx: Context, private val act: MainActivity) {
+  /** Colours of the system bars: `#rrggbb` for the status bar area, the navigation bar area; light = light icons. */
+  @JavascriptInterface
+  fun setBars(top: String, bottom: String, light: Boolean) {
+    try { act.setBars(Color.parseColor(top), Color.parseColor(bottom), light) } catch (e: Exception) { /* ignore */ }
+  }
+
   /**
    * JSON array of `{id, label, path, removable}`: the private app storage, the app folder on the shared
    * ("device") storage and the app folder on every mounted SD card. No permission needed for any of them.

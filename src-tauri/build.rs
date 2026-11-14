@@ -26,5 +26,9 @@ fn embed_themes() {
 fn main() {
     emit_buildinfo();
     embed_themes();
+    // Android 15+ devices with 16 KB pages: align the ELF LOAD segments accordingly
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t == "android") {
+        println!("cargo:rustc-link-arg=-Wl,-z,max-page-size=16384");
+    }
     tauri_build::build()
 }

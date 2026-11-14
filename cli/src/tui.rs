@@ -1344,6 +1344,11 @@ impl App {
             self.picker_key(k);
             return;
         }
+        // Ctrl+F = the filter "button": opens the filters (as a drawer over the list when the sidebar is hidden)
+        if k.code == KeyCode::Char('f') && k.modifiers.contains(KeyModifiers::CONTROL) && !k.modifiers.contains(KeyModifiers::ALT) {
+            self.focus = if self.focus == Focus::Sidebar { Focus::List } else { Focus::Sidebar };
+            return;
+        }
         match self.focus {
             Focus::List => self.list_key(k),
             Focus::Sidebar => self.side_key(k),
@@ -1522,6 +1527,13 @@ impl App {
             rows[1]
         };
         self.draw_tasks(f, list_area);
+        if !self.show_sidebar && self.focus == Focus::Sidebar {
+            // sidebar hidden: the filters open as a drawer over the left side of the list
+            let w = 26.min(rows[1].width);
+            let drawer = Rect { x: rows[1].x, y: rows[1].y, width: w, height: rows[1].height };
+            f.render_widget(Clear, drawer);
+            self.draw_sidebar(f, drawer);
+        }
         self.draw_input(f, rows[2]);
         if self.show_status {
             self.draw_status(f, rows[3]);
@@ -1863,8 +1875,8 @@ impl App {
             Some(m) => Span::styled(format!(" {m}"), Style::default().fg(Color::Yellow)),
             None => Span::styled(
                 match self.focus {
-                    Focus::List => " ↑↓ select · Space done · Enter edit · Del delete · Alt+↑↓ priority · / search · F7 note · F8 files · F1 help",
-                    Focus::Sidebar => " ↑↓ select · Enter only this · Space add/remove · Del clear section · Tab back · F1 help",
+                    Focus::List => " ↑↓ select · Space done · Enter edit · Del delete · Alt+↑↓ priority · / search · Ctrl+F filters · F7 note · F8 files · F1 help",
+                    Focus::Sidebar => " ↑↓ select · Enter only this · Space add/remove · Del clear section · Tab/Esc/Ctrl+F back · F1 help",
                     Focus::Input => " Enter ok · Tab complete/list · Esc back · F1 help",
                 },
                 dim(),
@@ -2031,7 +2043,7 @@ impl App {
             "           Enter        edit the selected line in the bar",
             "           Delete       delete (Ctrl+Z undoes)",
             "           Alt+↑ / Alt+↓  raise / lower priority",
-            "           Tab          sidebar filters   Esc  clear filter / quit",
+            "           Tab          sidebar filters   Ctrl+F  filters (drawer when the sidebar is hidden)   Esc  clear filter / quit",
             "           Ctrl+P       select as parent: new entries go below it, indented (again: off)",
             "           Ctrl+O       move the filtered tasks (+ sub-entries) to another file",
             "Sub-entries: start a line with - / -- / --- / ---- (sub, sub-sub ...)",

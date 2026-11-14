@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=todo.txt (alt id)
+Comment=todo.txt client
+Exec=todotxt
+Icon=dev.todotxt.desktop
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=dev.todotxt.desktop
+NoDisplay=true
