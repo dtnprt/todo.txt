@@ -18,7 +18,10 @@
 body { margin: 0; padding-bottom: 28px; background-color: var(--bg); background-image: var(--bg-image, none); background-attachment: fixed; background-repeat: no-repeat; background-size: cover; color: var(--text); font: var(--font-size, 15px)/1.45 var(--font, system-ui, -apple-system, "Segoe UI", sans-serif); }
 /* Linux frameless window is transparent: the page is clipped to rounded corners (theme token --win-radius, 0 = square) */
 :root { --win-radius: 10px; }
-html.win-round { background: transparent; }
+/* color-scheme: dark/light makes the root canvas opaque; the transparent window needs it off on <html> (the theme tokens colour everything) */
+/* A transparent root background would hand <body>'s background to the canvas (background propagation), and the clip-path
+   below would clip nothing: an invisible gradient on <html> stops the propagation, so <body> paints (and clips) its own. */
+html.win-round { background: transparent linear-gradient(transparent, transparent) !important; color-scheme: normal; }
 html.win-round body { clip-path: inset(0 round var(--win-radius)); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
@@ -105,7 +108,7 @@ body.nostatus .sidebar { max-height: calc(100vh - 64px - var(--composer-h, 76px)
   /* too narrow for the sidebar: hide it (the Android drawer is separate) */
   .layout { grid-template-columns: minmax(0, 1fr); padding: 12px 12px 0; }
   .layout #listWrap, .layout #raw { grid-column: 1; }
-  body:not(.android) .sidebar { display: none; }
+  body:not(.android):not(.drawer-open) .sidebar { display: none; }
   .composer { margin-left: 0 !important; }
   /* the entry buttons (note / edit / delete) float over the text on hover instead of taking space from it */
   body:not(.android) .task { position: relative; }
@@ -143,11 +146,12 @@ button:disabled.dd-item, .dd-menu button:disabled { opacity: .45; }
 .composer .mode { flex: none; width: 40px; align-self: stretch; border: 0; border-right: 1px solid var(--line); border-radius: 5px 0 0 5px; background: none; color: var(--muted); }
 .composer.search .mode { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .field { position: relative; flex: 1; height: 40px; min-width: 0; }
-.field .hl, .field input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0 12px; border: 0; background: transparent; font: inherit; line-height: 40px; letter-spacing: normal; }
+.field .hl, .field input, .field textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0 12px; border: 0; background: transparent; font: inherit; line-height: 40px; letter-spacing: normal; }
+.field textarea { resize: none; white-space: pre; overflow: hidden; }
 .field .hl { white-space: pre; overflow: hidden; pointer-events: none; color: var(--text); }
-.field input { color: transparent; caret-color: var(--text); outline: none; border-radius: 0 5px 5px 0; }
-.field input::placeholder { color: var(--muted); }
-.field input::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.field input, .field textarea { color: transparent; caret-color: var(--text); outline: none; border-radius: 0 5px 5px 0; }
+.field textarea::placeholder { color: var(--muted); }
+.field textarea::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .tk-pri { color: var(--pX); } .tk-pA { color: var(--pA); } .tk-pB { color: var(--pB); } .tk-pC { color: var(--pC); } .tk-pD { color: var(--pD); }
 .tk-project { color: var(--accent); }
 .tk-context { color: var(--ok); }
@@ -220,7 +224,12 @@ body { min-height: 100vh; box-sizing: border-box; display: flex; flex-direction:
 
 /* highlighted edit field inside a task row */
 .field.edit-field { flex: none; width: 100%; height: 32px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; }
-.edit-field .hl, .edit-field input { line-height: 30px; }
+.edit-field .hl, .edit-field input, .edit-field textarea { line-height: 30px; }
+/* option: long text wraps and the field grows (hl and textarea share one grid cell; the highlight layer sets the height) */
+body.wrap-input .field { display: grid; height: auto; min-height: 40px; }
+body.wrap-input .field .hl, body.wrap-input .field textarea { position: static; grid-area: 1 / 1; inset: auto; height: auto; padding: 9px 12px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
+body.wrap-input .field.edit-field { height: auto; min-height: 32px; }
+body.wrap-input .edit-field .hl, body.wrap-input .edit-field textarea { padding: 4px 12px; }
 .tk-date { color: var(--muted); }
 .tk-done { color: var(--ok); }
 
@@ -604,7 +613,7 @@ body .set-tabs button[role="tab"][aria-selected="true"] { border-bottom-color: v
 /* Minimal mode = the normal layout without top bar and status bar. The input bar sits below the list (in the layout, nothing floats
    over the entries) and is only there while the mouse is over the window or the bar has the focus; the list box shrinks upwards by
    exactly the height of the bar and grows back when it goes away. */
-body.minimal .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1; transform: none; pointer-events: auto; z-index: auto; }
+body.minimal .composer, body:not(.android).minimal .composer, body:not(.android).minimal.nosidebar .composer, body:not(.android).minimal .layout.no-side .composer { position: relative; left: auto; right: auto; bottom: auto; margin-bottom: 0; opacity: 1; transform: none; pointer-events: auto; z-index: auto; }
 /* it slides in from below while the list box shrinks upwards in the same animation (max-height from 0 to the natural height of the bar) */
 body.minimal .composer { box-sizing: border-box; max-height: var(--composer-h, 76px); transition: max-height .28s cubic-bezier(.2, .8, .2, 1), padding .28s cubic-bezier(.2, .8, .2, 1), opacity .22s ease, transform .28s cubic-bezier(.2, .8, .2, 1); }
 body.minimal:not(.keep-input):not(.show-input) .composer:not(:focus-within) { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; transform: translateY(14px); pointer-events: none; overflow: hidden; }
@@ -668,6 +677,11 @@ body.android .composer { position: relative; bottom: auto; flex: none; margin-to
 body.android #list .task { transition: transform .15s ease; touch-action: pan-y; }
 
 /* desktop: the filter button (sidebar off) opens the filters as a drawer from the left */
-body.drawer-open .sidebar { position: fixed !important; top: 0; bottom: 0; left: 0; width: min(82vw, 320px); max-height: none !important; overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 14px; margin-left: 0 !important; z-index: 25; box-shadow: 0 0 30px rgba(0,0,0,.4); }
+body.drawer-open .sidebar { position: fixed !important; top: 0; bottom: 0; left: 0; width: min(82vw, 320px); max-height: none !important; overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 14px; margin-left: 0 !important; z-index: 25; color: var(--text); font: inherit; border-radius: 0 var(--win-radius) var(--win-radius) 0; box-shadow: 0 0 30px rgba(0,0,0,.4); }
 body.drawer-open #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 24; }
 #filterBtn[hidden] { display: none !important; }
+
+/* window not active: the focused input bar is not outlined (it still takes the focus back when the window returns) */
+body.win-blur .composer-box:focus-within { border-color: var(--line); box-shadow: none; }
+body.win-blur .composer.search .composer-box { box-shadow: none; }
+body.win-blur .field textarea, body.win-blur .field input { caret-color: transparent; }

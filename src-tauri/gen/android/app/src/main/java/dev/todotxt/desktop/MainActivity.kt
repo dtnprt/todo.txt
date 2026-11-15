@@ -35,7 +35,22 @@ class MainActivity : TauriActivity() {
       WindowInsetsCompat.CONSUMED
     }
     content.background = bars
+    // The colours of the last run: system bars (and the WebView below, see onWebViewCreate) start in the theme colours, so no
+    // default (black / white) look shows before the page has loaded and applied its theme.
+    val prefs = getSharedPreferences("bars", Context.MODE_PRIVATE)
+    if (prefs.contains("top")) {
+      bars.topColor = prefs.getInt("top", Color.BLACK)
+      bars.bottomColor = prefs.getInt("bottom", Color.BLACK)
+      window.statusBarColor = Color.TRANSPARENT
+      window.navigationBarColor = Color.TRANSPARENT
+      val c = WindowCompat.getInsetsController(window, window.decorView)
+      c.isAppearanceLightStatusBars = !prefs.getBoolean("light", true)
+      c.isAppearanceLightNavigationBars = !prefs.getBoolean("light", true)
+      bars.invalidateSelf()
+    }
   }
+
+  private var web: WebView? = null
 
   /** Paints the areas behind the (transparent) status / navigation bar in the colours of the page theme. */
   private val bars = BarsDrawable()
@@ -45,6 +60,8 @@ class MainActivity : TauriActivity() {
       bars.topColor = top
       bars.bottomColor = bottom
       bars.invalidateSelf()
+      web?.setBackgroundColor(bottom)
+      getSharedPreferences("bars", Context.MODE_PRIVATE).edit().putInt("top", top).putInt("bottom", bottom).putBoolean("light", lightIcons).apply()
       window.statusBarColor = Color.TRANSPARENT
       window.navigationBarColor = Color.TRANSPARENT
       val c = WindowCompat.getInsetsController(window, window.decorView)
@@ -54,6 +71,9 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onWebViewCreate(webView: WebView) {
+    web = webView
+    val prefs = getSharedPreferences("bars", Context.MODE_PRIVATE)
+    if (prefs.contains("bottom")) webView.setBackgroundColor(prefs.getInt("bottom", Color.BLACK))
     webView.addJavascriptInterface(StorageBridge(this, this), "TodoAndroid")
   }
 }

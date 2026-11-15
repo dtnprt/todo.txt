@@ -167,6 +167,16 @@ function highlightWords(frag, text, atStart) {
   });
 }
 
+/** The one-line fields are textareas (so they can wrap): keep them single-line (Enter never inserts a line break, pasted breaks become spaces). */
+function attachSingleLine(ta) {
+  ta.addEventListener('input', () => {
+    if (!/[\r\n]/.test(ta.value)) return;
+    const c = ta.selectionStart ?? 0;
+    ta.value = ta.value.replace(/\r\n|[\r\n]/g, ' ');
+    ta.setSelectionRange(c, c);   // line breaks become one space each, so the caret index is unchanged
+  });
+}
+
 /**
  * Wrap a text input in a highlighting overlay. Append `.el` where the input should go.
  * Call `.sync()` after changing `input.value` from code.
@@ -176,6 +186,7 @@ export function attachHighlight(input) {
   const hl = el('div', { className: 'hl' });
   hl.setAttribute('aria-hidden', 'true');
   wrap.append(hl, input);
+  attachSingleLine(input);
   attachHistory(input);
   attachAutoDate(input);
   attachPriorityCase(input);
@@ -319,6 +330,7 @@ export function attachAutoDate(input) {
  * @param {() => boolean} [o.calendarEnabled]  whether typing `due` opens the date picker
  */
 export function createComposer({ form, input, hl, ac, modeBtn, getWords, onAdd, onSearch, onNote, calendarEnabled = () => true }) {
+  attachSingleLine(input);
   attachHistory(input);
   attachAutoDate(input);
   attachPriorityCase(input);
@@ -507,6 +519,7 @@ export function createComposer({ form, input, hl, ac, modeBtn, getWords, onAdd, 
       if (e.key === 'ArrowUp') { assist.index = (assist.index - 1 + n) % n; drawList(); return e.preventDefault(); }
       if (e.key === 'Enter' || e.key === 'Tab') { accept(assist.index); return e.preventDefault(); }
     }
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); form.requestSubmit(); return; }
     if (e.key === 'Escape') {
       if (assist) {
         const { start, word } = currentWord();

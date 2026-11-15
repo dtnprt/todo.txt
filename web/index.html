@@ -73,8 +73,8 @@
       </div>
     </div>
     <button id="sideBtn" class="icon desktop-only" title="Show / hide sidebar (F4)" aria-label="Toggle sidebar"><i class="fa-solid fa-table-columns" aria-hidden="true"></i></button>
-    <div class="spacer"></div>
     <button id="filterBtn" class="icon" title="Filters" aria-label="Filters"><i class="fa-solid fa-filter" aria-hidden="true"></i></button>
+    <div class="spacer"></div>
     <button id="optBtn" class="icon" title="Settings" aria-label="Settings"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
     <span id="winCtl" class="win-ctl" hidden>
       <button class="icon" id="winMin" title="Minimize" aria-label="Minimize"><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
@@ -95,7 +95,7 @@
           <button type="button" id="modeBtn" class="mode" aria-label="Switch between add and search mode"></button>
           <div class="field">
             <div id="hl" class="hl" aria-hidden="true"></div>
-            <input id="addInput" type="text" spellcheck="false" autocomplete="off">
+            <textarea id="addInput" rows="1" spellcheck="false" autocomplete="off"></textarea>
           </div>
           <div id="ac" class="ac" hidden></div>
         </div>
@@ -135,6 +135,7 @@
         <button id="sideToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Sidebar <kbd>F4</kbd></button>
         <button id="statusToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Status bar</button>
         <button id="scrollbarToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Scrollbars</button>
+        <button id="wrapToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Wrap long text in the input bar and when editing (else it scrolls sideways)</button>
         <button id="datesToggle" role="menuitemcheckbox" aria-checked="false" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show created/done dates in entries</button>
         <button id="cornerToggle" role="menuitemcheckbox" aria-checked="true" data-keep><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Show file name in minimal mode</button>
         <button id="lineNoToggle" role="menuitemcheckbox" aria-checked="false" data-keep style="display:none"><span class="tick"><i class="fa-solid fa-check" aria-hidden="true"></i></span> Line numbers</button>

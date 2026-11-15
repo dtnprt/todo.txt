@@ -175,6 +175,7 @@ const state = {
   autoSave: isAndroid, // desktop + Android; stored in todo.cfg (Android: on by default)
   frameless: !isAndroid,   // desktop: always without the system frame (own window buttons); render() only applies it when running in Tauri
   cornerName: true,    // minimal mode: small file name in the bottom left corner
+  wrapInput: false,    // long text wraps in the input bar / edit field (else it scrolls sideways)
   showDates: false,    // show created/done dates inside the entries (else only tooltip + status bar on hover)
   lineNumbers: false,  // desktop only; stored in todo.cfg (`linenumbers=`)
   sort: 'priority',
@@ -190,7 +191,7 @@ function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       lines: state.browserList && webEncrypt ? null : state.lines, browserList: state.browserList, opened: state.opened, fileName: state.fileName, path: state.path, folder: isTauri ? state.folder : null, dirty: state.dirty,
-      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, scrollbars: state.scrollbars, hideInput: state.hideInput, touchBar: state.touchBar, showDates: state.showDates, cornerName: state.cornerName, theme: state.theme,
+      sort: state.sort, showDone: state.showDone, sidebar: state.sidebar, calendar: state.calendar, minimal: state.minimal, statusBar: state.statusBar, scrollbars: state.scrollbars, hideInput: state.hideInput, touchBar: state.touchBar, showDates: state.showDates, wrapInput: state.wrapInput, cornerName: state.cornerName, theme: state.theme,
     }));
   } catch { /* storage unavailable or full: ignore */ }
   scheduleAutoSave();
@@ -226,6 +227,7 @@ function restore() {
     state.hideInput = s.hideInput !== false;
     if (typeof s.touchBar === 'boolean') state.touchBar = s.touchBar;
     if (typeof s.showDates === 'boolean') state.showDates = s.showDates;
+    if (typeof s.wrapInput === 'boolean') state.wrapInput = s.wrapInput;
     if (typeof s.cornerName === 'boolean') state.cornerName = s.cornerName;
     if (s.theme === 'zelda') s.theme = 'sheikah';   // renamed
     {   // renamed / merged themes (also the `user:` form used by the desktop app)
@@ -1829,6 +1831,7 @@ async function loadAutoSave() {
     state.noCapture = flag('nocapture');
     if (/^\s*touchbar\s*=/m.test(cfg)) state.touchBar = flag('touchbar');
     if (/^\s*showdates\s*=/m.test(cfg)) state.showDates = flag('showdates');
+    if (/^\s*wrapinput\s*=/m.test(cfg)) state.wrapInput = flag('wrapinput');
     if (/^\s*cornername\s*=/m.test(cfg)) state.cornerName = flag('cornername');
     if (/^\s*scrollbars\s*=/m.test(cfg)) state.scrollbars = flag('scrollbars');
     if (/^\s*hideinput\s*=/m.test(cfg)) state.hideInput = flag('hideinput');
@@ -2029,7 +2032,7 @@ async function showImage(name) {
 /** Pasting a picture into the add bar / edit field saves it and inserts `image:NAME`. */
 document.addEventListener('paste', async (e) => {
   const input = e.target;
-  if (!(input instanceof HTMLInputElement) || (input.type && input.type !== 'text')) return;
+  if (!(input instanceof HTMLTextAreaElement) || !(input.id === 'addInput' || input.classList.contains('edit'))) return;
   const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
   if (!file) return;
   e.preventDefault();
@@ -2378,7 +2381,7 @@ function renderTask({ i, t }, idx) {
 
   const body = el('div', { className: 'body', title: 'Double-click to edit' });
   if (state.editing === i) {
-    const input = el('input', { type: 'text', className: 'edit', value: t.raw });
+    const input = el('textarea', { className: 'edit', rows: 1, spellcheck: false, value: t.raw });
     let finished = false;
     const finish = (save) => {
       if (finished) return;
@@ -2400,7 +2403,7 @@ function renderTask({ i, t }, idx) {
         else if (cleared === 'context') helper.showList('ctx');
         return;
       }
-      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
       else if (e.key === 'Escape') {
         if (!helper.closePopup()) finish(false);   // first Esc closes an open helper popup
       }
@@ -2484,6 +2487,8 @@ function render() {
   document.body.classList.toggle('noscrollbars', !state.scrollbars);
   $('#touchToggle').setAttribute('aria-checked', state.touchBar);
   $('#datesToggle').setAttribute('aria-checked', state.showDates);
+  $('#wrapToggle').setAttribute('aria-checked', state.wrapInput);
+  document.body.classList.toggle('wrap-input', state.wrapInput);
   $('#cornerToggle').setAttribute('aria-checked', state.cornerName);
   $('#touchBar').hidden = !state.touchBar || state.view === 'text';
   document.body.classList.toggle('minimal', state.minimal);
@@ -2524,16 +2529,18 @@ function render() {
   $('#list').hidden = !listMode;
   $('#listWrap').hidden = !listMode;
   $('#raw').hidden = listMode;
-  const showSide = listMode && state.sidebar;
+  const showSide = listMode && state.sidebar && (isAndroid || !narrowWin());   // desktop: too narrow for the inline sidebar -> filters only as a drawer
   $('#sidebar').hidden = !showSide;
   $('#layout').classList.toggle('no-side', !showSide);
   document.body.classList.toggle('side-open', isAndroid && showSide);
   // desktop: with the sidebar switched off the filter button opens the filters as a drawer (like on Android)
-  const drawer = !isAndroid && !state.sidebar && state.drawer && listMode;
+  const drawer = !isAndroid && !showSide && state.drawer && listMode;
   if (drawer) { $('#sidebar').hidden = false; $('#layout').classList.add('no-side'); }
   document.body.classList.toggle('drawer-open', drawer);
   $('#scrim').hidden = !((isAndroid && showSide) || drawer);
-  $('#filterBtn').hidden = !(isAndroid || (!state.sidebar && listMode));
+  // desktop: the sidebar button and the filter button share one place - the filter button while the sidebar is not shown inline (switched off or window too narrow)
+  $('#filterBtn').hidden = !(isAndroid || (!showSide && listMode));
+  $('#sideBtn').hidden = !$('#filterBtn').hidden;
   $('#filterBtn').classList.toggle('active', drawer);
   $('#sideToggle').setAttribute('aria-checked', state.sidebar);
   $('#sideToggle').disabled = !listMode;
@@ -3031,6 +3038,7 @@ document.addEventListener('scroll', (e) => {
 }, true);
 $('#minimalToggle').onclick = () => { state.minimal = !state.minimal; persist(); render(); };
 $('#cornerToggle').onclick = () => { state.cornerName = !state.cornerName; if (isTauri) setCfg('cornername', state.cornerName); persist(); render(); };
+$('#wrapToggle').onclick = () => { state.wrapInput = !state.wrapInput; if (isTauri) setCfg('wrapinput', state.wrapInput); persist(); render(); };
 $('#datesToggle').onclick = () => { state.showDates = !state.showDates; if (isTauri) setCfg('showdates', state.showDates); persist(); render(); };
 $('#touchToggle').onclick = () => { state.touchBar = !state.touchBar; if (isTauri) setCfg('touchbar', state.touchBar); persist(); render(); };
 $('#calToggle').onclick = () => { state.calendar = !state.calendar; persist(); render(); };
@@ -3195,6 +3203,7 @@ $('#lineNoToggle').onclick = () => {
 };
 $('#sideToggle').onclick = () => { state.sidebar = !state.sidebar; persist(); render(); };
 $('#sideBtn').onclick = () => { state.sidebar = !state.sidebar; state.drawer = false; persist(); render(); };
+function narrowWin() { return !isAndroid && innerWidth <= 720; }   // same breakpoint as the CSS that hides the inline sidebar
 // Dropdown menus (File, View): one open at a time.
 const closeMenus = () => document.querySelectorAll('.dd').forEach((d) => {
   const m = d.querySelector('.dd-menu');
@@ -3372,7 +3381,7 @@ document.addEventListener('keydown', (e) => {
       const order = ['priority', 'due', 'created', 'alpha', 'file'];
       state.sort = order[(order.indexOf(state.sort) + 1) % order.length];
     } else if (e.key === 'F3') state.showDone = !state.showDone;
-    else if (e.key === 'F4') { if (!listMode) return; state.sidebar = !state.sidebar; state.drawer = false; }
+    else if (e.key === 'F4') { if (!listMode) return; if (narrowWin()) state.drawer = !state.drawer; else { state.sidebar = !state.sidebar; state.drawer = false; } }
     else if (e.key === 'F5') { archiveDone(); return; }
     else if (e.key === 'F6') state.calendar = !state.calendar;
     if (e.key !== 'F1') { persist(); render(); }
@@ -3409,6 +3418,30 @@ document.addEventListener('click', (e) => {
   document.body.classList.add('show-input');   // minimal mode: show the bar first, a hidden element cannot take the focus
   $('#addInput').focus({ preventScroll: true });
 });
+
+// Window gets the focus (e.g. a click on free space, which starts a window drag and never reaches `click`): focus the input
+// bar so it is clear that typing starts right away. Not on touch screens, in the text view, while editing, or over a dialog.
+function focusInputOnWindowFocus() {
+  if (isAndroid || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)) return;
+  if (state.editing !== null || state.view === 'text') return;
+  const a = document.activeElement;
+  if (a && a !== document.body && a !== document.documentElement) return;
+  if (document.querySelector('.help:not([hidden]), .ui-dialog, .busy-overlay, #settings:not([hidden])')) return;
+  document.body.classList.add('show-input');
+  $('#addInput').focus({ preventScroll: true });
+}
+// The window is not the active one (another app in front): the input bar keeps its DOM focus (so dragging the window or switching
+// back does not lose it) but is drawn as unfocused (`body.win-blur`, no accent border). Tauri reports the real window focus; the
+// browser events are the fallback.
+function setWinFocus(on) {
+  document.body.classList.toggle('win-blur', !on);
+  if (on) setTimeout(focusInputOnWindowFocus, 0);
+}
+window.addEventListener('focus', () => setWinFocus(true));
+window.addEventListener('blur', () => setWinFocus(false));
+if (isTauri) {
+  try { tauri.window.getCurrentWindow().onFocusChanged(({ payload }) => setWinFocus(!!payload)).catch(() => {}); } catch { /* ignore */ }
+}
 
 // Drag & drop a file anywhere on the page.
 let dragDepth = 0;
@@ -3483,6 +3516,10 @@ function androidDeps() {
       if (home) { state.path = null; await androidCreateFile(`${home}/todo.txt`); }
     },
   };
+}
+if (!isAndroid && window.matchMedia) {
+  let was = narrowWin();
+  addEventListener('resize', () => { if (narrowWin() !== was) { was = narrowWin(); if (!was) state.drawer = false; render(); } });
 }
 if (isAndroid) {
   document.body.classList.add('android');
