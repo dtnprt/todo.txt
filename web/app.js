@@ -2529,23 +2529,20 @@ function render() {
   $('#list').hidden = !listMode;
   $('#listWrap').hidden = !listMode;
   $('#raw').hidden = listMode;
-  const showSide = listMode && state.sidebar && (isAndroid || !narrowWin());   // desktop: too narrow for the inline sidebar -> filters only as a drawer
+  const showSide = listMode && state.sidebar && (isAndroid || !narrowWin());   // desktop: too narrow for the inline sidebar -> it is shown as an overlay instead (state.drawer)
   $('#sidebar').hidden = !showSide;
   $('#layout').classList.toggle('no-side', !showSide);
   document.body.classList.toggle('side-open', isAndroid && showSide);
-  // desktop: with the sidebar switched off the filter button opens the filters as a drawer (like on Android)
-  const drawer = !isAndroid && !showSide && state.drawer && listMode;
+  // desktop, window too narrow: the sidebar button / F4 show the sidebar as an overlay over the list
+  const drawer = !isAndroid && narrowWin() && state.drawer && listMode;
   if (drawer) { $('#sidebar').hidden = false; $('#layout').classList.add('no-side'); }
   document.body.classList.toggle('drawer-open', drawer);
   $('#scrim').hidden = !((isAndroid && showSide) || drawer);
-  // desktop: the sidebar button and the filter button share one place - the filter button while the sidebar is not shown inline (switched off or window too narrow)
-  $('#filterBtn').hidden = !(isAndroid || (!showSide && listMode));
-  $('#sideBtn').hidden = !$('#filterBtn').hidden;
-  $('#filterBtn').classList.toggle('active', drawer);
+  $('#filterBtn').hidden = !isAndroid;   // the desktop uses the sidebar button (inline sidebar, or an overlay in a narrow window)
   $('#sideToggle').setAttribute('aria-checked', state.sidebar);
   $('#sideToggle').disabled = !listMode;
   $('#sideBtn').disabled = !listMode;
-  $('#sideBtn').classList.toggle('active', state.sidebar);
+  $('#sideBtn').classList.toggle('active', narrowWin() ? drawer : state.sidebar);
   $('#status').hidden = !listMode;
   $('#aboutVersion').textContent = appVersion ? `Version ${appVersion}` : '';
   document.title = state.fileName + (state.dirty ? '*' : '') + ' – todo.txt' + (appVersion ? `  v${appVersion}` : '');
@@ -3202,7 +3199,8 @@ $('#lineNoToggle').onclick = () => {
   render();
 };
 $('#sideToggle').onclick = () => { state.sidebar = !state.sidebar; persist(); render(); };
-$('#sideBtn').onclick = () => { state.sidebar = !state.sidebar; state.drawer = false; persist(); render(); };
+function toggleSidebar() { if (narrowWin()) state.drawer = !state.drawer; else { state.sidebar = !state.sidebar; state.drawer = false; } persist(); render(); }
+$('#sideBtn').onclick = toggleSidebar;
 function narrowWin() { return !isAndroid && innerWidth <= 720; }   // same breakpoint as the CSS that hides the inline sidebar
 // Dropdown menus (File, View): one open at a time.
 const closeMenus = () => document.querySelectorAll('.dd').forEach((d) => {
@@ -3381,7 +3379,7 @@ document.addEventListener('keydown', (e) => {
       const order = ['priority', 'due', 'created', 'alpha', 'file'];
       state.sort = order[(order.indexOf(state.sort) + 1) % order.length];
     } else if (e.key === 'F3') state.showDone = !state.showDone;
-    else if (e.key === 'F4') { if (!listMode) return; if (narrowWin()) state.drawer = !state.drawer; else { state.sidebar = !state.sidebar; state.drawer = false; } }
+    else if (e.key === 'F4') { if (!listMode) return; toggleSidebar(); return; }
     else if (e.key === 'F5') { archiveDone(); return; }
     else if (e.key === 'F6') state.calendar = !state.calendar;
     if (e.key !== 'F1') { persist(); render(); }

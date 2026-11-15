@@ -677,7 +677,7 @@ body.android .composer { position: relative; bottom: auto; flex: none; margin-to
 body.android #list .task { transition: transform .15s ease; touch-action: pan-y; }
 
 /* desktop: the filter button (sidebar off) opens the filters as a drawer from the left */
-body.drawer-open .sidebar { position: fixed !important; top: 0; bottom: 0; left: 0; width: min(82vw, 320px); max-height: none !important; overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 14px; margin-left: 0 !important; z-index: 25; color: var(--text); font: inherit; border-radius: 0 var(--win-radius) var(--win-radius) 0; box-shadow: 0 0 30px rgba(0,0,0,.4); }
+body.drawer-open .sidebar { position: fixed !important; top: 56px; bottom: 28px; left: 0; width: min(82vw, 320px); max-height: none !important; overflow: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px 14px; margin-left: 0 !important; z-index: 25; color: var(--text); font: inherit; border-radius: 0 var(--win-radius) var(--win-radius) 0; box-shadow: 0 0 30px rgba(0,0,0,.4); }
 body.drawer-open #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 24; }
 #filterBtn[hidden] { display: none !important; }
 
@@ -685,3 +685,10 @@ body.drawer-open #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45)
 body.win-blur .composer-box:focus-within { border-color: var(--line); box-shadow: none; }
 body.win-blur .composer.search .composer-box { box-shadow: none; }
 body.win-blur .field textarea, body.win-blur .field input { caret-color: transparent; }
+
+/* sidebar overlay (narrow desktop window): sits under the top bar and above the status bar, not over them */
+body.minimal.drawer-open .sidebar { top: 0; }
+body.nostatus.drawer-open .sidebar, body.minimal.drawer-open .sidebar { bottom: 0; }
+body.drawer-open .sidebar { border-radius: 0 var(--win-radius, 8px) var(--win-radius, 8px) 0; border: 1px solid var(--line); border-left: 0; }
+body.drawer-open #scrim { top: 56px; bottom: 28px; }
+body.minimal.drawer-open #scrim, body.nostatus.drawer-open #scrim { top: 0; bottom: 0; }
