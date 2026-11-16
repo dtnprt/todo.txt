@@ -179,9 +179,16 @@ jobs:
       - name: tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
       - name: build the apk
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
-        run: cargo tauri android build --apk --target aarch64
+        run: |
+          # ${{ env.X }} does not see the runner's own variables, so read them in the shell
+          ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}}"
+          if [ -z "$ndk" ] || [ ! -d "$ndk" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+            ndk="$ANDROID_HOME/ndk/27.2.12479018"
+          fi
+          echo "NDK_HOME=$ndk"
+          export NDK_HOME="$ndk"
+          cargo tauri android build --apk --target aarch64
       - name: sign and upload
         env:
           GH_TOKEN: ${{ github.token }}
